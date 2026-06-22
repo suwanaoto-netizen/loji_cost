@@ -3513,7 +3513,9 @@ function _pkMonths(vehicles){ const mo=[...new Set(vehicles.flatMap(v=>v.lines).
 function computePickup(vehicles){
   const {lastYM,prevYM}=_pkMonths(vehicles); const _pct=(c,p)=>p>0?((c-p)/p*100):0;
   const topCost=vehicles.slice().sort((a,b)=>b.total-a.total).slice(0,3);
-  const incRank=vehicles.map(v=>({v,p:_pct(_pkVSum(v,lastYM),_pkVSum(v,prevYM))})).filter(x=>_pkVSum(x.v,prevYM)>0&&x.p>0).sort((a,b)=>b.p-a.p);
+  // 直近3ヶ月（最新データ月の直前3ヶ月）の平均月次コストを基準に増加率を算出する
+  const _avg3=v=>lastYM?([1,2,3].reduce((a,d)=>a+_pkVSum(v,_shiftYm(lastYM,d)),0))/3:0;
+  const incRank=vehicles.map(v=>{const base=_avg3(v); return {v,p:_pct(_pkVSum(v,lastYM),base),base};}).filter(x=>x.base>0&&x.p>0).sort((a,b)=>b.p-a.p);
   const maintRank=vehicles.map(v=>({v,r:v.total>0?(v.byCat["修繕・維持費"]||0)/v.total:0})).filter(x=>x.r>0).sort((a,b)=>b.r-a.r);
   return {topCost,incRank,maintRank,lastYM,prevYM};
 }
@@ -3663,7 +3665,7 @@ function renderVehMonitor(){
   const pkItem=(v,inner)=>`<div class="pk-item" onclick="openVehPanel('${v.key}','${v.kind}','${esc(v.target)}')">${inner}<span class="pk-detail">詳細${I.chev("#0E5A40",13)}</span></div>`;
   const att=[];
   if(topCost[0]) att.push(pkItem(topCost[0],`<span class="pk-rank">1</span><div class="pk-main"><div class="pk-plate">${esc(topCost[0].target)}</div><div class="pk-metric">累計コスト ${yen(topCost[0].total)}・全車両中 1位</div></div>`));
-  if(incRank[0]) att.push(pkItem(incRank[0].v,`<span class="pk-rank">2</span><div class="pk-main"><div class="pk-plate">${esc(incRank[0].v.target)}</div><div class="pk-metric">前月比 +${Math.round(incRank[0].p)}%</div></div>`));
+  if(incRank[0]) att.push(pkItem(incRank[0].v,`<span class="pk-rank">2</span><div class="pk-main"><div class="pk-plate">${esc(incRank[0].v.target)}</div><div class="pk-metric">直近3ヶ月平均比 +${Math.round(incRank[0].p)}%</div></div>`));
   if(maintRank[0]) att.push(pkItem(maintRank[0].v,`<span class="pk-rank">3</span><div class="pk-main"><div class="pk-plate">${esc(maintRank[0].v.target)}</div><div class="pk-metric">整備費比率 ${Math.round(maintRank[0].r*100)}%</div></div>`));
   const topItems=topCost.map((v,i)=>pkItem(v,`<span class="pk-rank wide">${i+1}位</span><div class="pk-main"><div class="pk-plate">${esc(v.target)}</div></div><span class="pk-amt">${yen(v.total)}</span>`));
   const incItems=incRank.slice(0,3).map(x=>pkItem(x.v,`<span class="pk-pct">+${Math.round(x.p)}%</span><div class="pk-main"><div class="pk-plate">${esc(x.v.target)}</div></div>`));
@@ -3671,7 +3673,7 @@ function renderVehMonitor(){
   const pickup=`<div class="pickup">
     <div class="pk-card pk-card-alert" id="pk-attention"><div class="pk-h">${I.alert("#B23A2E",14)} 要確認車両</div><div class="pk-list">${att.join("")||emptyMsg}</div></div>
     <div class="pk-card" id="pk-topcost"><div class="pk-h">${I.truckN("#0E5A40",15)} コスト上位車両</div><div class="pk-list">${topItems.join("")||emptyMsg}</div></div>
-    <div class="pk-card" id="pk-increase"><div class="pk-h" title="先月（${moJP(lastYM)}）を、その前月（${moJP(prevYM)}）と比較した前月比の増加率です">${I.alert("#B87514",14)} コスト増加車両 <span class="pk-hsub">前月比（先月：${moJP(lastYM)}）</span></div><div class="pk-list">${incItems.join("")||emptyMsg}</div></div>
+    <div class="pk-card" id="pk-increase"><div class="pk-h" title="先月（${moJP(lastYM)}）のコストを、その直前3ヶ月（${moJP(_shiftYm(lastYM,3))}〜${moJP(prevYM)}）の平均月次コストと比較した増加率です">${I.alert("#B87514",14)} コスト増加車両 <span class="pk-hsub">直近3ヶ月平均比（先月：${moJP(lastYM)}）</span></div><div class="pk-list">${incItems.join("")||emptyMsg}</div></div>
   </div>`;
   const charts=`<div class="mon-charts">${renderCostTrendBar()}${renderOfficeLineChart()}</div>`;
   return head+kpis+pickup+charts;
