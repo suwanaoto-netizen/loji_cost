@@ -561,8 +561,10 @@
   .vt .total{font-size:15px;color:var(--ink)}
   /* 個別モニター：項目金額を横一列（表の列）で表示。車番・累計コスト・操作は左固定。 */
   .vt-metrics{min-width:max-content}
-  .vt-metrics thead th.vm-cat{text-align:center;font-size:11px;font-weight:800;letter-spacing:.3px;box-shadow:inset 0 -1px 0 var(--line);height:34px;padding-top:0;padding-bottom:0;vertical-align:middle;box-sizing:border-box}
-  .vt-metrics thead th.vm-label{background:#F3F5F2;font-size:10px;font-weight:700;line-height:1.3;color:var(--inkSoft);white-space:normal;vertical-align:bottom;max-width:132px;min-width:92px;top:34px}
+  /* 3段ヘッダー：原価分類(vm-bunrui,30px) / 原価項目(vm-cat,30px) / 明細(vm-label)。縦スクロール時の固定オフセットを段で揃える */
+  .vt-metrics thead th.vm-bunrui{text-align:center;font-size:11px;font-weight:800;letter-spacing:.4px;height:30px;padding-top:0;padding-bottom:0;vertical-align:middle;box-sizing:border-box;box-shadow:inset 0 -1px 0 var(--line);top:0}
+  .vt-metrics thead th.vm-cat{text-align:center;font-size:10.5px;font-weight:800;letter-spacing:.2px;background:#F3F5F2;box-shadow:inset 0 -1px 0 var(--line);height:30px;padding-top:0;padding-bottom:0;vertical-align:middle;box-sizing:border-box;top:30px;max-width:160px;white-space:normal;line-height:1.2}
+  .vt-metrics thead th.vm-label{background:#F3F5F2;font-size:10px;font-weight:700;line-height:1.3;color:var(--inkSoft);white-space:normal;vertical-align:bottom;max-width:132px;min-width:92px;top:60px}
   .vt-metrics thead th.vm-label.sum{color:var(--ink)}
   .vt-metrics thead th.vm-label.sortable{cursor:pointer}
   .vt-metrics thead th.vm-label .ar,.vt-metrics thead th.vm-label .ar-dim{margin-left:3px}
@@ -580,6 +582,10 @@
   .vt-metrics td.sticky-c3,.vt-metrics thead th.sticky-c3{text-align:left;padding-left:12px;padding-right:8px}
   .vt-metrics td.sticky-c3 .veh-edit-btn{padding:5px 10px}
   .vt-metrics td.sticky-c3 .icon-btn{width:26px;height:26px;border-radius:7px}
+  .vt-metrics .sticky-c-end{box-shadow:1px 0 0 var(--line)}
+  .veh-note-bar{display:flex;align-items:center;gap:8px;background:var(--amberSoft);border:1px solid rgba(184,117,20,.3);color:#7A5310;border-radius:10px;padding:9px 13px;font-size:12px;font-weight:700;margin-bottom:12px}
+  .bunrui-wrap{margin-top:6px;min-height:0}
+  .bunrui-badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:800;white-space:nowrap}
   .mtag{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:800;white-space:nowrap}
   .mtag.exist{background:var(--tealSoft);color:var(--teal)}
   .mtag.newv{background:var(--amberSoft);color:var(--amber)}
@@ -1160,63 +1166,152 @@ const CAT_STYLE={
   "調達コスト":{fg:"#3B4DA0",bg:"#E6E9F7"},
   "税金":{fg:"#5A6472",bg:"#E9ECE6"},
 };
-/* 個別モニターは緑系のみで配色する。分類は緑のトーン差（濃淡）で識別する（CAT_STYLE は全体用で不変）。 */
-const GREEN_CAT_STYLE={
-  "燃料費":{fg:"#0E7A4B",bg:"#E4F4EC"},
-  "修繕・維持費":{fg:"#157F73",bg:"#DCEFEC"},
-  "保険料":{fg:"#2F8F5B",bg:"#E7F4EB"},
-  "調達コスト":{fg:"#25786A",bg:"#DEEFEA"},
-  "税金":{fg:"#4C8A3F",bg:"#EAF3E1"},
-  "通行料":{fg:"#5E8C2A",bg:"#EEF3DD"},
+/* ═══════ 原価分類モデル（スプレッドシート：原価分類→原価項目→明細）═══════
+   車両コスト＝車両に紐づく原価項目、拠点コスト＝拠点(営業所)に紐づく原価項目。
+   各明細の金額は、連携済みの明細データ（コスト分類＋内訳）から src で対応づけて集計する。
+   対応データの無い明細は src 未指定とし na（"—"）表示する（構造優先）。
+   legacyCat：原価項目→既存6分類への対応（既存集計・グラフとの後方互換のため保持）。 */
+const COST_BUNRUI_STYLE={
+  "変動費":{fg:"#0E7A4B",bg:"#E4F4EC"},
+  "固定費":{fg:"#236AAE",bg:"#E6EEF8"},
+  "間接費":{fg:"#9A6312",bg:"#F6ECDA"},
+  "その他直接費":{fg:"#6B4FA3",bg:"#EEEAF7"},
 };
-function greenCatStyle(c){ return GREEN_CAT_STYLE[c]||{fg:"#0E7A4B",bg:"#E4F4EC"}; }
-/* 個別モニターの横一列メトリクス：書類項目の金額を分類ごとに集計（通算＝分類別通算金額）。
-   部品代／技術代・リース総額は明細が合計しか持たないため na（"—"）表示。 */
-function vehicleMetrics(v){
-  const bySub={}; let jidoshazei=0, juryozei=0, leaseMonthly=0;
+function bunruiStyle(b){ return COST_BUNRUI_STYLE[b]||{fg:"#0E7A4B",bg:"#E4F4EC"}; }
+function greenCatStyle(c){ return COST_BUNRUI_STYLE[c]||{fg:"#0E7A4B",bg:"#E4F4EC"}; } // 後方互換
+
+const VEHICLE_COST_MODEL=[
+  {bunrui:"変動費",komoku:"燃料費（ガソリン・軽油）",legacyCat:"燃料費",items:[
+    {label:"給油金額（軽油／ガソリン）",src:"fuel_dg"},
+  ]},
+  {bunrui:"変動費",komoku:"オイル費（油脂費）",legacyCat:"修繕・維持費",items:[
+    {label:"油脂代（エンジン・ギア・グリス等）",src:"sub:oil"},
+    {label:"オイルエレメント代"},
+  ]},
+  {bunrui:"変動費",komoku:"タイヤ費",legacyCat:"修繕・維持費",items:[
+    {label:"タイヤ購入代（本数×単価）",src:"sub:tire"},
+    {label:"組換・脱着工賃"},
+    {label:"廃タイヤ処分料・タイヤ保管料"},
+  ]},
+  {bunrui:"変動費",komoku:"尿素水費（アドブルー）",legacyCat:"燃料費",items:[
+    {label:"アドブルー購入代",src:"sub:adblue"},
+  ]},
+  {bunrui:"変動費",komoku:"車検・修理費",legacyCat:"修繕・維持費",items:[
+    {label:"車検整備費用（部品代＋技術料）",src:"sub:inspect_shaken"},
+    {label:"定期点検費用",src:"inspect_periodic"},
+    {label:"故障・事故修理費用（部品代＋技術料）",src:"sub:repair"},
+    {label:"検査手数料（印紙・証紙代）"},
+  ]},
+  {bunrui:"固定費",komoku:"車両償却費",legacyCat:"調達コスト",items:[
+    {label:"車両取得価額（本体＋架装・付属品）"},
+    {label:"減価償却費（期間配分額）",src:"cat:調達コスト"},
+  ]},
+  {bunrui:"固定費",komoku:"人件費（運転者）",legacyCat:"調達コスト",items:[
+    {label:"基本給"},{label:"各種手当（時間外・深夜・休日・歩合・通勤等）"},{label:"賞与"},
+    {label:"法定福利費（事業主負担）"},{label:"福利厚生費"},{label:"退職金"},
+  ]},
+  {bunrui:"固定費",komoku:"自動車関係諸税",legacyCat:"税金",items:[
+    {label:"自動車税（種別割）",src:"jidoshazei"},
+    {label:"自動車重量税",src:"juryozei"},
+    {label:"環境性能割"},
+  ]},
+  {bunrui:"固定費",komoku:"自動車関係保険料",legacyCat:"保険料",items:[
+    {label:"自賠責保険料",src:"sub:jibaiseki"},
+    {label:"任意保険料（対人・対物・車両・搭乗者等）",src:"sub:voluntary"},
+  ]},
+  {bunrui:"固定費",komoku:"借入金利息",legacyCat:"調達コスト",items:[
+    {label:"車両ローン支払利息"},{label:"運転資金等の借入利息（按分）"},
+  ]},
+  {bunrui:"固定費",komoku:"通行料（道路使用料）",legacyCat:"通行料",items:[
+    {label:"高速道路料金（ETC）",src:"cat:通行料"},
+    {label:"一般有料道路料金"},
+  ]},
+  {bunrui:"固定費",komoku:"フェリー航送料",legacyCat:"通行料",items:[
+    {label:"フェリー運賃（車両航送）"},{label:"ドライバー乗船運賃"},
+  ]},
+];
+const SITE_COST_MODEL=[
+  {bunrui:"固定費",komoku:"荷役関連費用",legacyCat:"調達コスト",items:[
+    {label:"荷役作業委託費（積込・取卸）"},{label:"附帯作業費（仕分・検品等）"},
+    {label:"荷役機材費（パレット・固縛資材・カゴ車）"},{label:"構内作業員人件費（自社対応分）"},
+  ]},
+  {bunrui:"間接費",komoku:"施設利用料（家賃等）",legacyCat:"調達コスト",items:[
+    {label:"営業所・事務所家賃（賃借料）"},{label:"車庫・駐車場賃借料"},
+    {label:"倉庫・荷捌き場賃借料"},{label:"水道光熱費"},
+  ]},
+  {bunrui:"間接費",komoku:"施設賦課税（固定資産税等）",legacyCat:"税金",items:[
+    {label:"土地・建物の固定資産税"},{label:"償却資産税"},{label:"都市計画税"},
+  ]},
+  {bunrui:"間接費",komoku:"事務員等人件費",legacyCat:"調達コスト",items:[
+    {label:"給与・各種手当"},{label:"賞与"},{label:"法定福利費（事業主負担）"},{label:"退職給付費用"},
+  ]},
+  {bunrui:"間接費",komoku:"施設等の減価償却費",legacyCat:"調達コスト",items:[
+    {label:"建物・構築物の減価償却費"},{label:"機械設備（フォークリフト・洗車機等）の減価償却費"},{label:"器具備品（PC・什器等）の減価償却費"},
+  ]},
+  {bunrui:"間接費",komoku:"その他一般管理費",legacyCat:"調達コスト",items:[
+    {label:"通信費（電話・携帯・回線）"},{label:"システム利用料（配車・動態・デジタコ・会計）"},{label:"会費（トラック協会等）"},
+    {label:"事務用品・消耗品費"},{label:"旅費交通費"},
+  ]},
+  {bunrui:"その他直接費",komoku:"庸車費（外注運賃）",legacyCat:"調達コスト",items:[
+    {label:"委託運賃（支払運賃）"},{label:"附帯費用（待機料・手待ち料等）"},
+  ]},
+  {bunrui:"その他直接費",komoku:"貨物保険・賠償（貨物事故）",legacyCat:"保険料",items:[
+    {label:"貨物賠償責任保険料（運送保険）"},{label:"貨物事故の自己負担・弁償金"},
+  ]},
+  {bunrui:"その他直接費",komoku:"運転者教育・適性診断・健康診断費",legacyCat:"調達コスト",items:[
+    {label:"適性診断受診料（初任・適齢・特定）"},{label:"健康診断費用"},{label:"安全教育・研修・資格取得費"},
+  ]},
+];
+/* 原価項目→属性の索引（車両/拠点 両モデル）。入力画面のセレクトと legacyCat 変換に使用。 */
+const ALL_COST_MODEL=[...VEHICLE_COST_MODEL.map(g=>({...g,scope:"車両"})),...SITE_COST_MODEL.map(g=>({...g,scope:"拠点"}))];
+const KOMOKU_INDEX={}; ALL_COST_MODEL.forEach(g=>{ KOMOKU_INDEX[g.komoku]={bunrui:g.bunrui,legacyCat:g.legacyCat,scope:g.scope}; });
+
+/* 車両の連携明細を集計し、各明細(src)の金額を引けるようにする */
+function _vehAggregates(v){
+  const bySub={}; let jidoshazei=0, juryozei=0;
   (v.lines||[]).forEach(l=>{
     const sub=resolveSubcat(l.cat,l.item);
     if(sub) bySub[sub]=(bySub[sub]||0)+(+l.amount||0);
     if(l.cat==="税金"){ if((l.item||"").includes("重量税")) juryozei+=+l.amount||0; else if((l.item||"").includes("自動車税")) jidoshazei+=+l.amount||0; }
-    if(l.cat==="調達コスト"&&(l.item||"").includes("リース")) leaseMonthly+=+l.amount||0;
   });
-  const cat=c=>v.byCat[c]||0, sub=code=>bySub[code]||0;
-  const inspect=sub("inspect_shaken")+sub("inspect_3m")+sub("inspect_other");
-  return [
-    {cat:"燃料費",metrics:[
-      {label:"通算",value:cat("燃料費"),isSum:true},
-      {label:"給油履歴（ガソリン・軽油・アドブルー）レシート／カード明細金額（円）",value:cat("燃料費")},
-    ]},
-    {cat:"修繕・維持費",metrics:[
-      {label:"通算",value:cat("修繕・維持費"),isSum:true},
-      {label:"定期点検請求書 合計金額（円）",value:inspect},
-      {label:"定期点検請求書 部品代（円）",value:0,na:true},
-      {label:"定期点検請求書 技術代（円）",value:0,na:true},
-      {label:"修理 合計金額",value:sub("repair")},
-      {label:"修理 部品代（円）",value:0,na:true},
-      {label:"修理 技術代（円）",value:0,na:true},
-      {label:"タイヤ交換金額（円）",value:sub("tire")},
-    ]},
-    {cat:"保険料",metrics:[
-      {label:"通算",value:cat("保険料"),isSum:true},
-      {label:"自賠責保険 保険費用（円）",value:sub("jibaiseki")},
-      {label:"任意保険 保険費用（円）",value:sub("voluntary")},
-    ]},
-    {cat:"調達コスト",metrics:[
-      {label:"通算",value:cat("調達コスト"),isSum:true},
-      {label:"リース 総額（円）",value:0,na:true},
-      {label:"リース 月間リース料金（円）",value:leaseMonthly},
-    ]},
-    {cat:"税金",metrics:[
-      {label:"通算",value:cat("税金"),isSum:true},
-      {label:"自動車税 費用（円）",value:jidoshazei},
-      {label:"重量税 費用（円）",value:juryozei},
-    ]},
-    {cat:"通行料",metrics:[
-      {label:"通算",value:cat("通行料"),isSum:true},
-      {label:"高速道路通行料（ETC）金額（円）",value:cat("通行料")},
-    ]},
-  ];
+  const byCat=v.byCat||{};
+  const fuelDG=(byCat["燃料費"]||0)-(bySub.adblue||0); // 給油（軽油/ガソリン系）＝燃料費 − アドブルー
+  const inspectPeriodic=(bySub.inspect_3m||0)+(bySub.inspect_other||0);
+  return {bySub,byCat,jidoshazei,juryozei,fuelDG,inspectPeriodic};
+}
+function _resolveSrc(src,agg){
+  if(!src) return null; // 対応データ無し → na
+  if(src.indexOf("sub:")===0) return agg.bySub[src.slice(4)]||0;
+  if(src.indexOf("cat:")===0) return agg.byCat[src.slice(4)]||0;
+  if(src==="fuel_dg") return Math.max(0,agg.fuelDG);
+  if(src==="jidoshazei") return agg.jidoshazei;
+  if(src==="juryozei") return agg.juryozei;
+  if(src==="inspect_periodic") return agg.inspectPeriodic;
+  return null;
+}
+/* 原価項目モデル＋集計から、表示用メトリクス（原価分類・原価項目・明細列＋通算）を生成 */
+function _metricsFromModel(model,agg){
+  return model.map(g=>{
+    const cells=g.items.map(it=>{ const val=agg?_resolveSrc(it.src,agg):null; return {label:it.label,value:val||0,na:(val==null)}; });
+    const sum=cells.reduce((a,c)=>a+(c.na?0:c.value),0);
+    return {bunrui:g.bunrui,komoku:g.komoku,metrics:[{label:"通算",value:sum,isSum:true},...cells]};
+  });
+}
+/* 車両コスト：1車両の原価項目別メトリクス */
+function vehicleMetrics(v){ return _metricsFromModel(VEHICLE_COST_MODEL,_vehAggregates(v)); }
+/* 拠点コスト：1拠点(営業所)の原価項目別メトリクス（現状ソース無し＝全て na） */
+function siteMetrics(office){ return _metricsFromModel(SITE_COST_MODEL,null); }
+/* 明細の原価項目を取得（未設定の既存明細は cat+内訳から推定） */
+function lineKomoku(l){
+  if(l&&l.komoku&&KOMOKU_INDEX[l.komoku]) return l.komoku;
+  const cat=l&&l.cat, sub=l?resolveSubcat(l.cat,l.item):null;
+  if(cat==="燃料費") return sub==="adblue"?"尿素水費（アドブルー）":"燃料費（ガソリン・軽油）";
+  if(cat==="修繕・維持費"){ if(sub==="tire")return"タイヤ費"; if(sub==="oil")return"オイル費（油脂費）"; return"車検・修理費"; }
+  if(cat==="通行料") return "通行料（道路使用料）";
+  if(cat==="保険料") return "自動車関係保険料";
+  if(cat==="税金") return "自動車関係諸税";
+  if(cat==="調達コスト") return "車両償却費";
+  return "";
 }
 const DOC_TYPES=["請求書","見積書","領収書","納品書","明細書","保険証券","納付書"];
 const DOC_CATS=["全ての書類",...DOC_TYPES];
@@ -2523,8 +2618,9 @@ function renderPanel(){
         ${isReflected?"":`<button class="lc-del" title="この明細を削除" onclick="pnAskDeleteLine(${l.lid})">${I.x("#B23A2E",15)}</button>`}</div>
       <div class="fld"><label>項目</label><input class="in b-g" ${ro} value="${esc(l.item)}" oninput="pnLine(${l.lid},'item',this.value)"></div>
       <div class="grid2">
-        <div class="fld"><label>コスト分類 ${catHelp()}</label>
-          <select class="in" ${dis} onchange="pnLine(${l.lid},'cat',this.value)">${CATS.map(c=>`<option ${c===l.cat?"selected":""}>${c}</option>`).join("")}</select></div>
+        <div class="fld"><label>原価項目（原価分類） ${catHelp()}</label>
+          ${komokuSelectHTML(l.lid,l,isReflected)}
+          <div id="pn-bunrui-${l.lid}" class="bunrui-wrap">${bunruiBadge(l)}</div></div>
         <div class="fld"><label>発生日</label><input class="in mono" ${ro} value="${esc(l.inspectedAt)}" oninput="pnLine(${l.lid},'inspectedAt',this.value)"></div>
       </div>
       <div id="pn-subcat-wrap-${l.lid}">${subcatFieldHTML(l)}</div>
@@ -2636,8 +2732,13 @@ function pnLine(lid,field,val){
   if(field==="amount"){l.amount=parseInt(String(val).replace(/[^0-9]/g,""))||0;
     const ck=document.getElementById("pn-amtck-"+lid); if(ck) ck.style.display=(state.draft._ocr||[]).includes(l.amount)?"":"none";}
   else if(field==="liters"||field==="unitPrice"){ const s=String(val).replace(/[^0-9.]/g,""); l[field]=s===""?null:parseFloat(s); }
+  else if(field==="komoku"){
+    // 原価項目を選択：原価項目を保存し、既存集計用の legacyCat（コスト分類）へ自動変換する
+    l.komoku=val; const idx=KOMOKU_INDEX[val]; if(idx) l.cat=idx.legacyCat;
+    const bw=document.getElementById("pn-bunrui-"+lid); if(bw) bw.innerHTML=bunruiBadge(l);
+  }
   else l[field]=val;
-  if(field==="item"||field==="cat"){
+  if(field==="item"||field==="cat"||field==="komoku"){
     // 内訳（連携用）は cat+item の従属値。項目名・分類を直すと判定ルールに従い再判定し、
     // 読み取り専用表示をその場で更新する（直接編集は不可）。
     const sc=resolveSubcat(l.cat,l.item); if(sc) l.subCat=sc; else delete l.subCat;
@@ -2646,6 +2747,20 @@ function pnLine(lid,field,val){
     const fw=document.getElementById("pn-fuel-wrap-"+lid); if(fw) fw.innerHTML=fuelFieldsHTML(l);
   }
   refreshPreview();
+}
+/* 原価項目セレクト（原価分類でグルーピング。車両／拠点の両モデルから生成） */
+function komokuSelectHTML(lid,l,disabled){
+  const cur=lineKomoku(l);
+  const groups={}; const order=[];
+  ALL_COST_MODEL.forEach(g=>{ const k=g.scope+"｜"+g.bunrui; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(g.komoku); });
+  const opts=order.map(k=>`<optgroup label="${esc(k)}">`+groups[k].map(km=>`<option value="${esc(km)}" ${km===cur?"selected":""}>${esc(km)}</option>`).join("")+`</optgroup>`).join("");
+  return `<select class="in" ${disabled?"disabled":""} onchange="pnLine(${lid},'komoku',this.value)"><option value="" ${cur?"":"selected"}>（未分類）</option>${opts}</select>`;
+}
+/* 原価分類バッジ（選択中の原価項目から原価分類を表示） */
+function bunruiBadge(l){
+  const km=lineKomoku(l); const idx=km?KOMOKU_INDEX[km]:null; if(!idx) return "";
+  const cs=bunruiStyle(idx.bunrui);
+  return `<span class="bunrui-badge" style="color:${cs.fg};background:${cs.bg}">${esc(idx.scope)}・${esc(idx.bunrui)}</span>`;
 }
 /* 車番：2文字以上一致する登録車番の候補（一致順）＋「対象なし」 */
 function _lcsLen(a,b){ a=a||""; b=b||""; if(!a||!b) return 0; let best=0; const dp=Array(b.length+1).fill(0);
@@ -3610,10 +3725,11 @@ function alertDispatch(id){
 
 function renderVehicles(){
   const tabs=`<div class="upl-tabs" style="margin-bottom:18px">
-    <button class="upl-tab ${state.vehTab!=="individual"?"active":""}" onclick="setVehTab('monitor')">コストモニター</button>
-    <button class="upl-tab ${state.vehTab==="individual"?"active":""}" onclick="setVehTab('individual')">個別モニター</button>
+    <button class="upl-tab ${state.vehTab!=="individual"&&state.vehTab!=="sites"?"active":""}" onclick="setVehTab('monitor')">コストモニター</button>
+    <button class="upl-tab ${state.vehTab==="individual"?"active":""}" onclick="setVehTab('individual')">車両コスト</button>
+    <button class="upl-tab ${state.vehTab==="sites"?"active":""}" onclick="setVehTab('sites')">拠点コスト</button>
   </div>`;
-  return tabs+(state.vehTab==="individual"?renderVehIndividual():renderVehMonitor());
+  return tabs+(state.vehTab==="individual"?renderVehIndividual():state.vehTab==="sites"?renderVehSites():renderVehMonitor());
 }
 /* ───── コストモニタータブ：全車両（ゴミ箱を除く）のコスト動向サマリー。絞り込み・ゴミ箱の影響を受けない。 ───── */
 function renderVehMonitor(){
@@ -3733,7 +3849,7 @@ function renderVehIndividual(){
       ? `<button class="icon-btn restore" title="コストモニターに戻す" onclick="event.stopPropagation();vehAskRestore('${v.key}')">${I.undo("#0E7A4B",13)}</button>`
       : `<button class="veh-edit-btn" onclick="event.stopPropagation();openVehEdit('${v.key}','${v.kind}','${esc(v.target)}')">${I.pencil("#0E7A4B",13)} 編集</button>
          <button class="icon-btn" title="ゴミ箱へ移動" style="margin-left:5px" onclick="event.stopPropagation();vehAskTrash('${v.key}')">${I.trash("#B23A2E",13)}</button>`;
-    const metricCells=vehicleMetrics(v).map(g=>{const cs=greenCatStyle(g.cat);
+    const metricCells=vehicleMetrics(v).map(g=>{const cs=bunruiStyle(g.bunrui);
       return g.metrics.map((m,i)=>`<td class="vm-col ${i===0?"grp-start":""} ${m.isSum?"sum":""} ${m.na?"na":""}" ${m.isSum?`style="color:${cs.fg}"`:""}>${m.na?"—":yen(m.value)}</td>`).join("");
     }).join("");
     return `<tr class="vrow${inTrash?" is-trash":""}" ${inTrash?"":`onclick="openVehPanel('${v.key}','${v.kind}','${esc(v.target)}')"`}>
@@ -3747,8 +3863,9 @@ function renderVehIndividual(){
   }).join("");
 
   const metricSchema=vehicleMetrics(pageVeh[0]);
-  const groupHdr=metricSchema.map(g=>{const cs=greenCatStyle(g.cat);
-    return `<th class="vm-cat grp-start" colspan="${g.metrics.length}" style="color:${cs.fg};background:${cs.bg}">${esc(g.cat)}</th>`;}).join("");
+  const bunruiHdr=costBunruiHdr(metricSchema);
+  const groupHdr=metricSchema.map(g=>{const cs=bunruiStyle(g.bunrui);
+    return `<th class="vm-cat grp-start" colspan="${g.metrics.length}" style="color:${cs.fg}">${esc(g.komoku)}</th>`;}).join("");
   let _mi=0;
   const labelHdr=metricSchema.map(g=>g.metrics.map((m,i)=>{
     const idx=_mi++;
@@ -3761,7 +3878,8 @@ function renderVehIndividual(){
 
   const table=`<div class="veh-card"><div class="tscroll"><table class="vt vt-metrics">
     <thead>
-      <tr>${thVehSticky('target','車番','sticky-c1')}${thVehSticky('total','累計コスト','sticky-c2 r')}<th rowspan="2" class="sticky-c sticky-c3">操作</th>${groupHdr}${thVeh('last','最終発生 / 明細数','',2)}</tr>
+      <tr>${thVehSticky('target','車番','sticky-c1')}${thVehSticky('total','累計コスト','sticky-c2 r')}<th rowspan="3" class="sticky-c sticky-c3">操作</th>${bunruiHdr}${thVeh('last','最終発生 / 明細数','',3)}</tr>
+      <tr>${groupHdr}</tr>
       <tr>${labelHdr}</tr>
     </thead>
     <tbody>${rows}</tbody></table></div>${pager("veh",info)}</div>`;
@@ -3780,10 +3898,49 @@ function thVeh(key,label,cls,rowspan){
   const a=state.vehSort.key===key;
   return `<th ${rowspan?`rowspan="${rowspan}"`:""} class="sortable ${cls||""} ${a?"sorted":""}" onclick="setVehSort('${key}')"><span class="th-in">${label}${vehSortArrow(key)}</span></th>`;
 }
-/* 個別モニターの固定列ヘッダー（車番・累計コスト）。横スクロール時も左に固定する2段ヘッダー用。 */
+/* 車両コストの固定列ヘッダー（車番・累計コスト）。横スクロール時も左に固定する3段ヘッダー用。 */
 function thVehSticky(key,label,cls){
   const a=state.vehSort.key===key;
-  return `<th rowspan="2" class="sortable sticky-c ${cls||""} ${a?"sorted":""}" onclick="setVehSort('${key}')"><span class="th-in">${label}${vehSortArrow(key)}</span></th>`;
+  return `<th rowspan="3" class="sortable sticky-c ${cls||""} ${a?"sorted":""}" onclick="setVehSort('${key}')"><span class="th-in">${label}${vehSortArrow(key)}</span></th>`;
+}
+/* 原価分類バンド：連続する同一原価分類の原価項目をまとめた最上段ヘッダー */
+function costBunruiHdr(schema){
+  let html="", i=0;
+  while(i<schema.length){ const b=schema[i].bunrui; let span=0,j=i;
+    while(j<schema.length&&schema[j].bunrui===b){ span+=schema[j].metrics.length; j++; }
+    const cs=bunruiStyle(b);
+    html+=`<th class="vm-bunrui grp-start" colspan="${span}" style="color:${cs.fg};background:${cs.bg}">${esc(b)}</th>`; i=j;
+  }
+  return html;
+}
+/* ───── 拠点コストタブ：拠点(営業所)ごとに拠点原価項目を横一列で表示 ───── */
+function renderVehSites(){
+  const head=`<div class="pagehead pagehead-veh">
+    <div><p>連携済みの書類から、拠点（営業所）ごとに拠点コスト（荷役・施設・庸車・一般管理費など）を原価分類・原価項目別に集計します。1営業所＝1レコードで表示します。</p></div>
+  </div>`;
+  const note=`<div class="veh-note-bar">${I.alert("#B87514",14)} 拠点コストの明細データは連携準備中です。各原価項目の金額が連携されると、ここに自動で積み上がります。</div>`;
+  const schema=siteMetrics("");
+  const bunruiHdr=costBunruiHdr(schema);
+  const groupHdr=schema.map(g=>{const cs=bunruiStyle(g.bunrui);
+    return `<th class="vm-cat grp-start" colspan="${g.metrics.length}" style="color:${cs.fg}">${esc(g.komoku)}</th>`;}).join("");
+  const labelHdr=schema.map(g=>g.metrics.map((m,i)=>
+    `<th class="vm-label ${i===0?"grp-start":""} ${m.isSum?"sum":""}">${esc(m.label)}</th>`).join("")).join("");
+  const rows=CATEGORIES.map(o=>{
+    const m=siteMetrics(o);
+    const cells=m.map(g=>g.metrics.map((mm,i)=>`<td class="vm-col ${i===0?"grp-start":""} ${mm.isSum?"sum":""} na">—</td>`).join("")).join("");
+    return `<tr class="vrow" style="cursor:default">
+      <td class="sticky-c sticky-c1"><span class="plate">${esc(o)}</span></td>
+      <td class="sticky-c sticky-c2 sticky-c-end r total na">—</td>
+      ${cells}</tr>`;
+  }).join("");
+  const table=`<div class="veh-card"><div class="tscroll"><table class="vt vt-metrics">
+    <thead>
+      <tr><th rowspan="3" class="sticky-c sticky-c1">営業所（拠点）</th><th rowspan="3" class="sticky-c sticky-c2 sticky-c-end r">累計コスト</th>${bunruiHdr}</tr>
+      <tr>${groupHdr}</tr>
+      <tr>${labelHdr}</tr>
+    </thead>
+    <tbody>${rows}</tbody></table></div></div>`;
+  return head+note+table;
 }
 function toggleVeh(k){if(state.vehExpanded.has(k))state.vehExpanded.delete(k);else state.vehExpanded.add(k);render();}
 function setVehCategoryFilter(v){ state.vehCategoryFilter=v; state.vehPage=1; render(); }
