@@ -574,6 +574,10 @@
   .vt-metrics .sticky-c1{left:0;width:142px;min-width:142px;max-width:142px}
   .vt-metrics .sticky-c2{left:142px;width:116px;min-width:116px;max-width:116px}
   .vt-metrics .sticky-c3{left:258px;width:124px;min-width:124px;max-width:124px;box-shadow:1px 0 0 var(--line)}
+  /* 操作列：ボタンがスクロール境界線に被らないよう左寄せ・余白縮小・アイコンボタン小型化 */
+  .vt-metrics td.sticky-c3,.vt-metrics thead th.sticky-c3{text-align:left;padding-left:12px;padding-right:8px}
+  .vt-metrics td.sticky-c3 .veh-edit-btn{padding:5px 10px}
+  .vt-metrics td.sticky-c3 .icon-btn{width:26px;height:26px;border-radius:7px}
   .mtag{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:800;white-space:nowrap}
   .mtag.exist{background:var(--tealSoft);color:var(--teal)}
   .mtag.newv{background:var(--amberSoft);color:var(--amber)}
@@ -3720,9 +3724,9 @@ function renderVehIndividual(){
 
   const rows=pageVeh.map(v=>{
     const actCell=inTrash
-      ? `<button class="icon-btn restore" title="コストモニターに戻す" onclick="event.stopPropagation();vehAskRestore('${v.key}')">${I.undo("#0E7A4B",15)}</button>`
+      ? `<button class="icon-btn restore" title="コストモニターに戻す" onclick="event.stopPropagation();vehAskRestore('${v.key}')">${I.undo("#0E7A4B",13)}</button>`
       : `<button class="veh-edit-btn" onclick="event.stopPropagation();openVehEdit('${v.key}','${v.kind}','${esc(v.target)}')">${I.pencil("#0E7A4B",13)} 編集</button>
-         <button class="icon-btn" title="ゴミ箱へ移動" style="margin-left:6px" onclick="event.stopPropagation();vehAskTrash('${v.key}')">${I.trash("#B23A2E",15)}</button>`;
+         <button class="icon-btn" title="ゴミ箱へ移動" style="margin-left:5px" onclick="event.stopPropagation();vehAskTrash('${v.key}')">${I.trash("#B23A2E",13)}</button>`;
     const metricCells=vehicleMetrics(v).map(g=>{const cs=greenCatStyle(g.cat);
       return g.metrics.map((m,i)=>`<td class="vm-col ${i===0?"grp-start":""} ${m.isSum?"sum":""} ${m.na?"na":""}" ${m.isSum?`style="color:${cs.fg}"`:""}>${m.na?"—":yen(m.value)}</td>`).join("");
     }).join("");
@@ -3730,7 +3734,7 @@ function renderVehIndividual(){
       <td class="sticky-c sticky-c1"><span class="plate">${esc(v.target)}</span>
         ${v.fuso?`<div style="font-size:10.5px;color:var(--inkSoft);margin-top:5px">${esc(v.fuso.body)}${v.fuso.reefer&&v.fuso.reefer!=="なし"?" / "+esc(v.fuso.reefer):""}</div>`:""}</td>
       <td class="sticky-c sticky-c2 r total">${yen(v.total)}</td>
-      <td class="sticky-c sticky-c3" style="text-align:right;white-space:nowrap">${actCell}</td>
+      <td class="sticky-c sticky-c3" style="white-space:nowrap">${actCell}</td>
       ${metricCells}
       <td style="font-family:var(--mono);font-size:11px;color:var(--inkSoft);white-space:nowrap">${v.last}<div style="margin-top:3px">${v.count}明細</div></td>
     </tr>`;
@@ -3744,7 +3748,7 @@ function renderVehIndividual(){
 
   const table=`<div class="veh-card"><div class="tscroll"><table class="vt vt-metrics">
     <thead>
-      <tr>${thVehSticky('target','車番','sticky-c1')}${thVehSticky('total','累計コスト','sticky-c2 r')}<th rowspan="2" class="sticky-c sticky-c3" style="text-align:right">操作</th>${groupHdr}${thVeh('last','最終発生 / 明細数','',2)}</tr>
+      <tr>${thVehSticky('target','車番','sticky-c1')}${thVehSticky('total','累計コスト','sticky-c2 r')}<th rowspan="2" class="sticky-c sticky-c3">操作</th>${groupHdr}${thVeh('last','最終発生 / 明細数','',2)}</tr>
       <tr>${labelHdr}</tr>
     </thead>
     <tbody>${rows}</tbody></table></div>${pager("veh",info)}</div>`;
