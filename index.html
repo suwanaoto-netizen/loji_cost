@@ -2362,10 +2362,8 @@ function renderCoach(){
 function openPanel(id){
   const d=docs.find(x=>x.id===id); if(!d)return;
   state.panelId=id; state.draft=Object.assign(JSON.parse(JSON.stringify(d)),{lines:JSON.parse(JSON.stringify(linesOf(id)))}); state.draft._ocr=ocrAmountCandidates(state.draft.lines); state.pvOriginal=JSON.parse(JSON.stringify(state.draft)); state.pvZoom=100; state.panelJustOpened=true;
-  // 書類を開いた時：明細がある書類は（アップロード・既存を問わず）左ペインにAI明細確認ステップを表示
-  state.aiConfirm = (state.draft.lines.length>0)
-    ? { sel:new Set(state.draft.lines.map(l=>l.lid)), col:"金額", previewPage:0 }
-    : null;
+  // AI明細確認ステップは廃止。書類を開いたら直接、明細フォーム（編集画面）を表示する
+  state.aiConfirm = null;
   renderOverlay();
 }
 function closePanel(){state.panelId=null;state.draft=null;state.pvOriginal=null;state.pnDeleteLid=null;state.aiConfirm=null;renderOverlay();}
@@ -2452,10 +2450,8 @@ function panelNav(delta){
   const ni=idx+delta; if(ni<0||ni>=list.length) return;
   const d=list[ni];
   state.panelId=d.id; state.draft=Object.assign(JSON.parse(JSON.stringify(d)),{lines:JSON.parse(JSON.stringify(linesOf(d.id)))}); state.draft._ocr=ocrAmountCandidates(state.draft.lines); state.pvOriginal=JSON.parse(JSON.stringify(state.draft)); state.pvZoom=100; state.panelJustOpened=false; state.pnDeleteLid=null;
-  // 遷移先の書類も明細があれば確認ステップを表示（選択状態は遷移先の明細で作り直す）
-  state.aiConfirm = (state.draft.lines.length>0)
-    ? { sel:new Set(state.draft.lines.map(l=>l.lid)), col:"金額", previewPage:0 }
-    : null;
+  // AI明細確認ステップは廃止。遷移先の書類も直接、明細フォームを表示する
+  state.aiConfirm = null;
   state.docPage=Math.floor(ni/state.docPerPage)+1; // 背面の一覧ページも同期
   render();
 }
