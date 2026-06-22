@@ -1334,11 +1334,14 @@ const CAT_DESC={
   "調達コスト":"車両ローン、リース料",
   "税金":"自動車税、重量税",
 };
-/* 「?」ヘルプ：ホバーでコスト分類の説明を表示 */
+/* 「?」ヘルプ：ホバーで原価項目（原価分類）の説明を表示 */
 function catHelp(){
-  const rows=CATS.map(c=>`<div class="hp-row"><span class="hp-c">${catPill(c)}</span><span class="hp-d">${esc(CAT_DESC[c]||"")}</span></div>`).join("");
-  return `<span class="help" tabindex="0">?<span class="help-pop"><span class="hp-h">コスト分類とは</span>
-    <span class="hp-intro">車両にかかる費用を会計区分で分類したものです。明細ごとに該当する分類を選択します。</span>${rows}</span></span>`;
+  const byB={}; const order=[];
+  ALL_COST_MODEL.forEach(g=>{ const k=g.scope+"｜"+g.bunrui; if(!byB[k]){byB[k]=[];order.push(k);} byB[k].push(g.komoku); });
+  const rows=order.map(k=>{ const bn=k.split("｜")[1]; const cs=bunruiStyle(bn);
+    return `<div class="hp-row"><span class="hp-c"><span class="catpill" style="color:${cs.fg};background:${cs.bg}">${esc(k)}</span></span><span class="hp-d">${byB[k].map(esc).join("、")}</span></div>`; }).join("");
+  return `<span class="help" tabindex="0">?<span class="help-pop" style="max-width:440px"><span class="hp-h">原価項目（原価分類）とは</span>
+    <span class="hp-intro">費用を原価分類（変動費・固定費・間接費・その他直接費）と原価項目で分類します。明細ごとに該当する原価項目を選択します。</span>${rows}</span></span>`;
 }
 /* 書類内の明細のコスト分類から想定書類タイプを集約（重複排除・主たる順を優先） */
 function expectedDocTypes(d){
@@ -2115,7 +2118,7 @@ function renderUploadModal(){
     ${catRow}
     <div class="ocr-row">
       <div class="switch ${u.ocr?"on":""}" onclick="toggleOcr()"><div class="knob"></div></div>
-      <div><div class="txt">AI-OCRで明細を自動データ化する</div><div class="sub">取引先・金額・対象車両・コスト分類を読み取ります（pdf, png, jpg）</div></div>
+      <div><div class="txt">AI-OCRで明細を自動データ化する</div><div class="sub">取引先・金額・対象車両・原価項目を読み取ります（pdf, png, jpg）</div></div>
     </div>`;
   const body=`<div class="m-body" ${proc?'style="opacity:.55;pointer-events:none"':""}>
     ${isSplit?renderSplitUploadBody(tabs):newBody}</div>`;
@@ -2277,7 +2280,7 @@ function renderSplitUploadBody(tabs){
     <div class="sp-field">
       <div class="ocr-row" style="margin-top:0">
         <div class="switch ${s.ocr?"on":""}" onclick="toggleSplitOcr()"><div class="knob"></div></div>
-        <div><div class="txt">AI-OCRで明細を自動データ化する</div><div class="sub">取引先・金額・対象車両・コスト分類を読み取ります（pdf, png, jpg）</div></div>
+        <div><div class="txt">AI-OCRで明細を自動データ化する</div><div class="sub">取引先・金額・対象車両・原価項目を読み取ります（pdf, png, jpg）</div></div>
       </div>
     </div>`;
 }
@@ -2748,13 +2751,22 @@ function pnLine(lid,field,val){
   }
   refreshPreview();
 }
-/* 原価項目セレクト（原価分類でグルーピング。車両／拠点の両モデルから生成） */
-function komokuSelectHTML(lid,l,disabled){
-  const cur=lineKomoku(l);
+/* 原価項目セレクトの選択肢（原価分類でグルーピング。車両／拠点の両モデルから生成） */
+function komokuOptions(cur){
   const groups={}; const order=[];
   ALL_COST_MODEL.forEach(g=>{ const k=g.scope+"｜"+g.bunrui; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(g.komoku); });
   const opts=order.map(k=>`<optgroup label="${esc(k)}">`+groups[k].map(km=>`<option value="${esc(km)}" ${km===cur?"selected":""}>${esc(km)}</option>`).join("")+`</optgroup>`).join("");
-  return `<select class="in" ${disabled?"disabled":""} onchange="pnLine(${lid},'komoku',this.value)"><option value="" ${cur?"":"selected"}>（未分類）</option>${opts}</select>`;
+  return `<option value="" ${cur?"":"selected"}>（未分類）</option>${opts}`;
+}
+/* 原価項目セレクト（書類明細の編集パネル用） */
+function komokuSelectHTML(lid,l,disabled){
+  return `<select class="in" ${disabled?"disabled":""} onchange="pnLine(${lid},'komoku',this.value)">${komokuOptions(lineKomoku(l))}</select>`;
+}
+/* 原価項目ピル（原価分類の色で表示。コスト分類＝原価項目の同義表示に使用） */
+function komokuPill(l){
+  const km=lineKomoku(l); const idx=km?KOMOKU_INDEX[km]:null;
+  const cs=idx?bunruiStyle(idx.bunrui):(CAT_STYLE[l&&l.cat]||CAT_STYLE["税金"]);
+  return `<span class="catpill" style="color:${cs.fg};background:${cs.bg}">${esc(km||(l&&l.cat)||"")}</span>`;
 }
 /* 原価分類バッジ（選択中の原価項目から原価分類を表示） */
 function bunruiBadge(l){
@@ -2827,7 +2839,7 @@ function renderPnDeleteConfirm(){
     <div class="m-body">
       <div class="ce-warn" style="background:var(--alertSoft);border-color:#E0B8B2">${I.alert("#B23A2E",18)}<div>
         <div class="ce-q">明細 ${idx}「${esc(l.item||"（項目なし）")}」を削除します。</div>
-        <div class="ce-note">${esc(l.cat)}・${yen(l.amount)}。この操作は保存または連携で確定します。削除後は元に戻せません。</div></div></div>
+        <div class="ce-note">${esc(lineKomoku(l)||l.cat)}・${yen(l.amount)}。この操作は保存または連携で確定します。削除後は元に戻せません。</div></div></div>
     </div>
     <div class="m-foot">
       <button class="btn-cancel" onclick="pnCancelDeleteLine()">キャンセル</button>
@@ -2993,17 +3005,22 @@ function buildVehicles(catFilter, range){
       const mv=vehicleById(vid);
       const target=mv?mv.plate:(l.plate||"未設定"); // 表示はマスタの正規plate（OCRゆらぎを吸収）
       const key=vid||(normPlate(l.plate)?"U:"+normPlate(l.plate):"未設定"); // 未登録は正規化plateで暫定集計
-      add(ensure(key,"単車",target),{lid:l.lid,src:"doc",docId:d.id,item:eff.item,cat:eff.cat,date:eff.inspectedAt,amount:+eff.amount,vendor:d.vendor,doc:d.name,office:d.category,fuso:l.fuso});
+      add(ensure(key,"単車",target),{lid:l.lid,src:"doc",docId:d.id,item:eff.item,cat:eff.cat,komoku:eff.komoku,date:eff.inspectedAt,amount:+eff.amount,vendor:d.vendor,doc:d.name,office:d.category,fuso:l.fuso});
     });
   });
   state.manualLines.forEach(m=>{ if(cf!=="all" && (m.office||"")!==cf) return; if(!inR(m.date)) return;
-    add(ensure(m.vkey,m.kind,m.target),{lid:m.id,src:"manual",item:m.item,cat:m.cat,date:m.date,amount:+m.amount,vendor:m.vendor||"手動追加",doc:"手動追加",office:m.office||""});
+    add(ensure(m.vkey,m.kind,m.target),{lid:m.id,src:"manual",item:m.item,cat:m.cat,komoku:m.komoku,date:m.date,amount:+m.amount,vendor:m.vendor||"手動追加",doc:"手動追加",office:m.office||""});
   });
   return [...map.values()].sort((a,b)=>b.total-a.total);
 }
 /* 車両内訳の編集（元データに反映） */
 function vehEditDocLine(docId,lid,field,val){
   const l=LINES.find(x=>x.docId===docId && x.lid===lid); if(!l)return;
+  if(field==="komoku"){ // 原価項目を変更：原価項目と、既存集計用の legacyCat を同時に override 記録
+    setOverride(docId, lid, "komoku", val, l);
+    const idx=KOMOKU_INDEX[val]; if(idx) setOverride(docId, lid, "cat", idx.legacyCat, l);
+    render(); return;
+  }
   const lf = field==="date" ? "inspectedAt" : field; // item/cat/amount は明細と同名
   const v  = field==="amount" ? (parseInt(String(val).replace(/[^0-9]/g,""))||0) : val;
   setOverride(docId, lid, lf, v, l); // 元データ（凍結済み）は変更せず override 調整として記録
@@ -3012,13 +3029,14 @@ function vehEditDocLine(docId,lid,field,val){
 function vehEditManualLine(id,field,val){
   const m=state.manualLines.find(x=>x.id===id); if(!m)return;
   if(field==="amount") m.amount=parseInt(String(val).replace(/[^0-9]/g,""))||0;
+  else if(field==="komoku"){ m.komoku=val; const idx=KOMOKU_INDEX[val]; if(idx) m.cat=idx.legacyCat; }
   else m[field]=val;
   render();
 }
 let _mlid=1;
 function vehAddManualLine(vkey,kind,target){
   const office=state.vehCategoryFilter==="all"?"":state.vehCategoryFilter;
-  state.manualLines.push({id:"m"+(_mlid++), vkey, kind, target, item:"新規コスト項目", cat:"修繕・維持費", date:"2026-06-01", amount:0, vendor:"手動追加", office});
+  state.manualLines.push({id:"m"+(_mlid++), vkey, kind, target, item:"新規コスト項目", cat:"修繕・維持費", komoku:"車検・修理費", date:"2026-06-01", amount:0, vendor:"手動追加", office});
   render();
 }
 function vehDeleteManualLine(id){ state.manualLines=state.manualLines.filter(x=>x.id!==id); render(); }
@@ -3051,7 +3069,6 @@ function vehEditVehicleOffice(key,office){
 
 /* 内訳の編集テーブル（モーダル内で使用） */
 function renderVehBreakdown(v){
-  const catOpts=c=>CATS.map(x=>`<option ${x===c?"selected":""}>${x}</option>`).join("");
   const rows=v.lines.slice().sort((a,b)=>a.date<b.date?1:-1).map(x=>{
     const isM=x.src==="manual";
     const onEdit=isM?`vehEditManualLine('${x.lid}'`:`vehEditDocLine('${x.docId}',${x.lid}`;
@@ -3065,13 +3082,13 @@ function renderVehBreakdown(v){
     return `<tr id="vdrow-${x.lid}" class="${isM?"vd-manual":""}${viewing?" vd-viewing":""}${String(x.lid)===String(state.vehEditHighlight)?" vd-hl":""}">
       <td style="width:118px"><input class="vd-in mono" value="${esc(x.date)}" onchange="${onEdit},'date',this.value)"></td>
       <td><input class="vd-in" value="${esc(x.item)}" onchange="${onEdit},'item',this.value)"></td>
-      <td style="width:126px"><select class="vd-in" onchange="${onEdit},'cat',this.value)">${catOpts(x.cat)}</select></td>
+      <td style="width:184px"><select class="vd-in" onchange="${onEdit},'komoku',this.value)">${komokuOptions(lineKomoku(x))}</select></td>
       <td style="width:140px">${vendorCell}</td>
       <td style="width:116px"><input class="vd-in mono ta-r" value="${(+x.amount)}" onchange="${onEdit},'amount',this.value)"></td>
       <td style="width:48px;text-align:center">${last}</td>
     </tr>`;
   }).join("");
-  return `<table class="vd-tbl"><thead><tr><th>発生日</th><th>項目</th><th>コスト分類</th><th>取引先</th><th style="text-align:right">金額</th><th></th></tr></thead>
+  return `<table class="vd-tbl"><thead><tr><th>発生日</th><th>項目</th><th>原価項目（原価分類）</th><th>取引先</th><th style="text-align:right">金額</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--inkSoft);padding:16px">明細がありません。下のボタンから追加できます。</td></tr>'}</tbody></table>
     <button class="vd-add" onclick="vehAddManualLine('${v.key}','${v.kind}','${esc(v.target)}')">${I.plus("#0E5A40",14)} 明細を追加</button>`;
 }
@@ -3079,7 +3096,7 @@ function openVehEdit(key,kind,target,hlLid){
   state.vehEditKey=key; state.vehEditMeta={key,kind,target}; state.vehEditConfirm=false;
   state.vehViewDocId=null; state.vehViewLid=null; state.vehEditHighlight=hlLid?String(hlLid):null;
   const v=buildVehicles(state.vehCategoryFilter).find(x=>x.key===key);
-  state.vehEditSnapshot = v ? v.lines.map(l=>({lid:String(l.lid),src:l.src,item:l.item,cat:l.cat,date:l.date,amount:+l.amount})) : [];
+  state.vehEditSnapshot = v ? v.lines.map(l=>({lid:String(l.lid),src:l.src,item:l.item,cat:l.cat,komoku:l.komoku,date:l.date,amount:+l.amount})) : [];
   render();
 }
 function closeVehEdit(){ state.vehEditKey=null; state.vehEditMeta=null; state.vehEditConfirm=false; state.vehEditSnapshot=null; state.vehViewDocId=null; state.vehViewLid=null; state.vehEditHighlight=null; render(); }
@@ -3115,21 +3132,21 @@ function seedChangelog(){
   if(!vs.length) return;
   const tpl=[
     {ts:"2026-06-13 08:51:33",user:"諏訪 尚杜",action:"変更",fn:l=>`金額を ${yen(l.amount)} → ${yen(Math.round(l.amount*1.05/100)*100)} に変更`},
-    {ts:"2026-06-12 17:20:08",user:"田中 美咲",action:"変更",fn:l=>`コスト分類を 「その他」→「${l.cat}」に変更`},
-    {ts:"2026-06-11 11:03:47",user:"諏訪 尚杜",action:"追加",fn:l=>`${l.cat}・${yen(Math.round(l.amount*0.4/100)*100)} を追加`},
+    {ts:"2026-06-12 17:20:08",user:"田中 美咲",action:"変更",fn:l=>`原価項目を 「その他」→「${lineKomoku(l)}」に変更`},
+    {ts:"2026-06-11 11:03:47",user:"諏訪 尚杜",action:"追加",fn:l=>`${lineKomoku(l)}・${yen(Math.round(l.amount*0.4/100)*100)} を追加`},
     {ts:"2026-06-09 14:38:22",user:"佐藤 健",action:"変更",fn:l=>`発生日を 2026-05-30 → ${l.date} に修正`},
     {ts:"2026-06-06 10:12:55",user:"田中 美咲",action:"削除",fn:l=>`重複明細（${yen(l.amount)}）を削除`},
   ];
   tpl.forEach((t,i)=>{ const v=vs[i%vs.length], l=v.lines[0];
-    CHANGELOG.push({ts:t.ts,user:t.user,action:t.action,vehKey:v.key,kind:v.kind,vehTarget:v.target,item:l.item,cat:l.cat,lid:l.lid,docId:l.docId,detail:t.fn(l)}); });
+    CHANGELOG.push({ts:t.ts,user:t.user,action:t.action,vehKey:v.key,kind:v.kind,vehTarget:v.target,item:l.item,cat:l.cat,komoku:lineKomoku(l),lid:l.lid,docId:l.docId,detail:t.fn(l)}); });
 }
 /* 編集確定時に差分（いつ・誰が・何を・どのように）を記録してから閉じる */
 function commitVehEdit(){
   const m=state.vehEditMeta||{}; const diff=vehEditDiff();
   diff.forEach(d=>{
-    const base={vehKey:m.key,kind:m.kind,vehTarget:m.target,item:d.l.item,cat:d.l.cat,lid:d.l.lid,docId:d.l.docId};
-    if(d.type==="added") logChange(Object.assign(base,{action:"追加",detail:`${d.l.cat}・${yen(d.l.amount)} を追加`}));
-    else if(d.type==="removed") logChange(Object.assign(base,{action:"削除",detail:`${d.l.cat}・${yen(d.l.amount)} を削除`}));
+    const base={vehKey:m.key,kind:m.kind,vehTarget:m.target,item:d.l.item,cat:d.l.cat,komoku:lineKomoku(d.l),lid:d.l.lid,docId:d.l.docId};
+    if(d.type==="added") logChange(Object.assign(base,{action:"追加",detail:`${lineKomoku(d.l)}・${yen(d.l.amount)} を追加`}));
+    else if(d.type==="removed") logChange(Object.assign(base,{action:"削除",detail:`${lineKomoku(d.l)}・${yen(d.l.amount)} を削除`}));
     else logChange(Object.assign(base,{action:"変更",detail:d.fields.map(f=>`${f[0]}を ${f[1]} → ${f[2]}`).join("、")}));
   });
   closeVehEdit();
@@ -3153,7 +3170,7 @@ function renderChangelog(){
         ? `<div class="clog-main">${esc(e.detail)}</div>
            <div class="clog-foot"><span>${I.user?I.user("#5A6472",12):""}${esc(e.user)}</span><span class="clog-link">コストモニターで開く ›</span></div>`
         : `<div class="clog-main"><span class="clog-plate">${esc(e.vehTarget)}</span>の「${esc(e.item)}」を ${esc(e.detail)}</div>
-           <div class="clog-foot"><span>${I.user?I.user("#5A6472",12):""}${esc(e.user)}</span>${catPill(e.cat)}<span class="clog-link">変更箇所を開く ›</span></div>`}
+           <div class="clog-foot"><span>${I.user?I.user("#5A6472",12):""}${esc(e.user)}</span>${komokuPill(e)}<span class="clog-link">変更箇所を開く ›</span></div>`}
     </button>`).join("");
   return `<div class="panel-ovl ${state._ovFresh?'anim':''}" onclick="if(event.target===this)closeChangelog()"><div class="clog ${state._ovFresh?'anim':''}">
     <div class="pn-head"><span style="font-size:15px;font-weight:800">変更履歴</span>
@@ -3171,7 +3188,7 @@ function vehEditAskConfirm(){ state.vehEditConfirm=true; render(); }
 function vehEditBack(){ state.vehEditConfirm=false; render(); }
 function vehEditDiff(){
   const v=buildVehicles(state.vehCategoryFilter).find(x=>x.key===state.vehEditKey);
-  const cur=v? v.lines.map(l=>({lid:String(l.lid),src:l.src,item:l.item,cat:l.cat,date:l.date,amount:+l.amount})) : [];
+  const cur=v? v.lines.map(l=>({lid:String(l.lid),src:l.src,item:l.item,cat:l.cat,komoku:l.komoku,date:l.date,amount:+l.amount})) : [];
   const snap=state.vehEditSnapshot||[];
   const snapMap=new Map(snap.map(l=>[l.lid,l])), curMap=new Map(cur.map(l=>[l.lid,l]));
   const out=[];
@@ -3179,7 +3196,7 @@ function vehEditDiff(){
   snap.forEach(l=>{ if(!curMap.has(l.lid)) out.push({type:"removed",l}); });
   cur.forEach(l=>{ const s=snapMap.get(l.lid); if(!s) return; const fields=[];
     if(l.item!==s.item) fields.push(["項目",s.item,l.item]);
-    if(l.cat!==s.cat) fields.push(["コスト分類",s.cat,l.cat]);
+    if(lineKomoku(l)!==lineKomoku(s)) fields.push(["原価項目",lineKomoku(s),lineKomoku(l)]);
     if(l.date!==s.date) fields.push(["発生日",s.date,l.date]);
     if(+l.amount!==+s.amount) fields.push(["金額",yen(s.amount),yen(l.amount)]);
     if(fields.length) out.push({type:"changed",l,fields});
@@ -3201,8 +3218,8 @@ function renderVehEditModal(){
   if(state.vehEditConfirm){
     const diff=vehEditDiff();
     const rows = diff.length ? diff.map(d=>{
-      if(d.type==="added") return `<div class="ce-row added"><span class="ce-tag">＋ 追加</span><div class="ce-body"><b>${esc(d.l.item)}</b><span class="ce-sub">${esc(d.l.cat)}・${yen(d.l.amount)}</span></div></div>`;
-      if(d.type==="removed") return `<div class="ce-row removed"><span class="ce-tag">－ 削除</span><div class="ce-body"><b>${esc(d.l.item)}</b><span class="ce-sub">${esc(d.l.cat)}・${yen(d.l.amount)}</span></div></div>`;
+      if(d.type==="added") return `<div class="ce-row added"><span class="ce-tag">＋ 追加</span><div class="ce-body"><b>${esc(d.l.item)}</b><span class="ce-sub">${esc(lineKomoku(d.l))}・${yen(d.l.amount)}</span></div></div>`;
+      if(d.type==="removed") return `<div class="ce-row removed"><span class="ce-tag">－ 削除</span><div class="ce-body"><b>${esc(d.l.item)}</b><span class="ce-sub">${esc(lineKomoku(d.l))}・${yen(d.l.amount)}</span></div></div>`;
       return `<div class="ce-row changed"><span class="ce-tag">✎ 変更</span><div class="ce-body"><b>${esc(d.l.item)}</b>
         <div class="ce-fields">${d.fields.map(f=>`<span class="ce-f">${esc(f[0])}：<span class="old">${esc(f[1])}</span> → <span class="new">${esc(f[2])}</span></span>`).join("")}</div></div></div>`;
     }).join("") : `<div class="ce-empty">変更された項目はありません。</div>`;
@@ -3277,7 +3294,7 @@ function genVehEvents(v){
   const rnd=_mulberry(_hash("veh:"+v.target));
   const slope=(rnd()*0.03)-0.006; // 車両ごとに修繕費の増減傾向を変える
   const cats=Object.keys(v.byCat).length?Object.keys(v.byCat):["修繕・維持費","燃料費"];
-  const real=v.lines.map(l=>({date:l.date,cat:l.cat,amount:+l.amount||0,item:l.item,vendor:l.vendor||"",src:l.src==="manual"?"manual":"doc"}));
+  const real=v.lines.map(l=>({date:l.date,cat:l.cat,komoku:l.komoku,amount:+l.amount||0,item:l.item,vendor:l.vendor||"",src:l.src==="manual"?"manual":"doc"}));
   const realKey=new Set(real.map(r=>(r.date||"").slice(0,7)+"|"+r.cat));
   const ev=real.slice();
   for(let back=35;back>=0;back--){
@@ -3303,7 +3320,7 @@ function _niceCeil(v){ if(v<=0)return 1; const p=Math.pow(10,Math.floor(Math.log
 /* 指定分類・粒度（日/週/月/年）で連続バケットに集計 */
 function vehChartData(events,cat,gran){
   const today=new Date(2026,5,13);
-  const filt=events.filter(e=>cat==="all"||e.cat===cat);
+  const filt=events.filter(e=>cat==="all"||lineKomoku(e)===cat);
   const wkStart=dt=>{ const x=new Date(dt); const off=(x.getDay()+6)%7; x.setDate(x.getDate()-off); return x; };
   const keyOf=date=>{ const [y,m,dd]=date.split("-").map(Number);
     if(gran==="year") return String(y);
@@ -3406,9 +3423,11 @@ function renderVehPanel(){
   const v=buildVehicles(state.vehCategoryFilter).find(x=>x.key===p.key)||{key:p.key,kind:p.kind,target:p.target,total:0,byCat:{},count:0,last:"",lines:[],fuso:null};
   const isMaster=plateRegistered(v.target);
   const events=genVehEvents(v);
-  let availCats=[...new Set(events.map(e=>e.cat))].sort((a,b)=>(v.byCat[b]||0)-(v.byCat[a]||0));
-  if(availCats.includes("修繕・維持費")) availCats=["修繕・維持費",...availCats.filter(c=>c!=="修繕・維持費")];
-  if(!availCats.includes(state.vehChartCat)) state.vehChartCat=availCats[0]||"修繕・維持費";
+  // 原価項目（コスト分類＝原価項目）ごとに集計し、グラフの絞り込み候補とする
+  const komSum={}; events.forEach(e=>{ const km=lineKomoku(e)||"未分類"; komSum[km]=(komSum[km]||0)+(+e.amount||0); });
+  let availCats=Object.keys(komSum).sort((a,b)=>komSum[b]-komSum[a]);
+  if(availCats.includes("車検・修理費")) availCats=["車検・修理費",...availCats.filter(c=>c!=="車検・修理費")];
+  if(!availCats.includes(state.vehChartCat)) state.vehChartCat=availCats[0]||"車検・修理費";
   const cat=state.vehChartCat;
   const catOpts=availCats.map(c=>`<option ${c===cat?'selected':''}>${esc(c)}</option>`).join("");
   const expanded=!!state.vehTlExpanded;
@@ -3416,7 +3435,7 @@ function renderVehPanel(){
   const tl=shown.map(e=>{ const m=e.src==="manual";
     return `<div class="tl-item ${m?'manual':''}"><span class="tl-dot"></span>
       <div class="tl-d">${e.date}</div>
-      <div class="tl-row"><span class="it">${esc(e.item)}</span>${catPill(e.cat)}<span class="tl-amt">${yen(e.amount)}</span></div>
+      <div class="tl-row"><span class="it">${esc(e.item)}</span>${komokuPill(e)}<span class="tl-amt">${yen(e.amount)}</span></div>
       <div style="margin-top:4px"><span class="tl-tag ${m?'m':''}">${m?'手動追加':'請求書より自動記録'}</span>${e.vendor?` <span style="font-size:10.5px;color:var(--inkSoft)">${esc(e.vendor)}</span>`:''}</div>
     </div>`; }).join("");
   const moreN=Math.max(0,events.length-10);
