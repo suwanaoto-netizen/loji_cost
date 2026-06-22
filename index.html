@@ -1313,18 +1313,37 @@ function lineKomoku(l){
   if(cat==="調達コスト") return "車両償却費";
   return "";
 }
-const DOC_TYPES=["請求書","見積書","領収書","納品書","明細書","保険証券","納付書"];
-const DOC_CATS=["全ての書類",...DOC_TYPES];
-/* コスト分類 → 想定される書類タイプ（先頭が主たる想定）。設定画面で編集可 */
-let CAT_DOCTYPES={
-  "燃料費":["請求書"],
-  "修繕・維持費":["請求書","見積書"],
-  "通行料":["明細書","請求書"],
-  "保険料":["保険証券","請求書"],
-  "調達コスト":["請求書","明細書"],
-  "税金":["納付書","明細書"],
+/* 元データ書類名（記載書類）：スプレッドシートの原価項目→記載書類。書類タイプ選択肢の真実源。 */
+const KOMOKU_DOCS={
+  "燃料費（ガソリン・軽油）":["給油レシート","燃料カード利用明細","SS請求書"],
+  "オイル費（油脂費）":["整備請求書","購入レシート"],
+  "タイヤ費":["タイヤ購入請求書","整備請求書","保管請求書","レシート"],
+  "尿素水費（アドブルー）":["給油レシート","購入請求書","カード利用明細"],
+  "車検・修理費":["車検請求書","整備明細書","整備請求書","点検記録簿"],
+  "車両償却費":["売買契約書","車両請求書","固定資産台帳","減価償却計算書"],
+  "人件費（運転者）":["給与明細","賃金台帳","賞与明細","社会保険料納入告知額","労働保険申告書","経費精算書","退職金規程","引当計算書","請求書"],
+  "自動車関係諸税":["納税通知書","重量税納付書","車検請求書","取得時の納付書"],
+  "自動車関係保険料":["保険証券","保険料領収書","請求書"],
+  "借入金利息":["返済予定表","金銭消費貸借契約書","借入金明細","利息計算書"],
+  "通行料（道路使用料）":["ETC利用明細","領収書"],
+  "フェリー航送料":["フェリー乗船券","フェリー会社請求書","乗船券","請求書"],
+  "荷役関連費用":["荷役業者請求書","購入請求書","レンタル請求書","賃金台帳","請求書"],
+  "施設利用料（家賃等）":["賃貸借契約書","賃料請求書","公共料金請求書","検針票"],
+  "施設賦課税（固定資産税等）":["固定資産税納税通知書","償却資産申告書","納税通知書"],
+  "事務員等人件費":["給与明細","賃金台帳","賞与明細","社会保険料納入告知額","労働保険申告書","退職金規程","引当計算書"],
+  "施設等の減価償却費":["固定資産台帳"],
+  "その他一般管理費":["通信会社請求書","SaaS・ベンダー請求書","会費請求書","購入レシート","経費精算書","領収書","請求書"],
+  "庸車費（外注運賃）":["庸車請求書","支払明細","運送委託契約書"],
+  "貨物保険・賠償（貨物事故）":["保険証券","保険料請求書","事故報告書","弁償請求書"],
+  "運転者教育・適性診断・健康診断費":["受診機関請求書","医療機関請求書","講習機関請求書","領収書"],
 };
-function docTypesForCat(c){ return CAT_DOCTYPES[c]||[]; }
+function komokuDocTypes(km){ return KOMOKU_DOCS[km]||[]; }
+/* 既存6分類→記載書類（原価項目経由で集約。マスタ表示・後方互換用） */
+function legacyCatDocTypes(c){ const out=[]; ALL_COST_MODEL.forEach(g=>{ if(g.legacyCat===c) komokuDocTypes(g.komoku).forEach(t=>{ if(!out.includes(t)) out.push(t); }); }); return out; }
+/* 選択可能な書類タイプ＝記載書類の重複排除リスト */
+const DOC_TYPES=[...new Set([].concat(...Object.values(KOMOKU_DOCS)))];
+const DOC_CATS=["全ての書類",...DOC_TYPES];
+function docTypesForCat(c){ return legacyCatDocTypes(c); } // 後方互換
 /* コスト分類の説明（ヘルプ用） */
 const CAT_DESC={
   "燃料費":"ガソリン・軽油代、アドブルー代",
@@ -1343,9 +1362,9 @@ function catHelp(){
   return `<span class="help" tabindex="0">?<span class="help-pop" style="max-width:440px"><span class="hp-h">原価項目（原価分類）とは</span>
     <span class="hp-intro">費用を原価分類（変動費・固定費・間接費・その他直接費）と原価項目で分類します。明細ごとに該当する原価項目を選択します。</span>${rows}</span></span>`;
 }
-/* 書類内の明細のコスト分類から想定書類タイプを集約（重複排除・主たる順を優先） */
+/* 書類内の明細の原価項目から想定書類タイプ（記載書類）を集約（重複排除・主たる順を優先） */
 function expectedDocTypes(d){
-  const out=[]; [...new Set(docLines(d).map(l=>l.cat))].forEach(c=>docTypesForCat(c).forEach(t=>{ if(!out.includes(t)) out.push(t); }));
+  const out=[]; [...new Set(docLines(d).map(l=>lineKomoku(l)))].forEach(k=>komokuDocTypes(k).forEach(t=>{ if(!out.includes(t)) out.push(t); }));
   return out;
 }
 /* カテゴリー（主に営業所名）。設定で管理し、書類に紐付く */
@@ -2600,8 +2619,8 @@ function renderPanel(){
         <select class="in" ${isReflected?"disabled":""} onchange="pnDoc('category',this.value)">${[""].concat(CATEGORIES.includes(d.category)||!d.category?CATEGORIES:[d.category].concat(CATEGORIES)).filter((x,i,a)=>a.indexOf(x)===i).map(c=>`<option value="${esc(c)}" ${c===(d.category||"")?"selected":""}>${c===""?"（未選択）":esc(c)}</option>`).join("")}</select></div>
       <div class="fld"><label>取引先</label><input class="in" ${isReflected?"readonly":""} value="${esc(d.vendor)}" oninput="pnVendor(this.value)"></div>
     </div>
-    <div class="fld"><label>書類タイプ ${expHint}</label>
-      <select class="in" ${isReflected?"disabled":""} onchange="pnDoc('cat',this.value)">${DOC_TYPES.map(t=>`<option ${t===(d.cat||'請求書')?'selected':''}>${esc(t)}</option>`).join("")}</select></div>
+    <div class="fld"><label>書類タイプ（記載書類）${expHint}</label>
+      ${docTypeSelectHTML(d,isReflected)}</div>
     <div class="total-box"><span class="lab">書類合計（明細 ${d.lines.length}件）</span><span class="v" id="pn-total">${yen(total)}</span></div>`;
 
   const legend=`<div class="legend">右の書類の読み取り箇所と対応：
@@ -2761,6 +2780,15 @@ function komokuOptions(cur){
 /* 原価項目セレクト（書類明細の編集パネル用） */
 function komokuSelectHTML(lid,l,disabled){
   return `<select class="in" ${disabled?"disabled":""} onchange="pnLine(${lid},'komoku',this.value)">${komokuOptions(lineKomoku(l))}</select>`;
+}
+/* 書類タイプ（記載書類）セレクト：原価項目でグルーピングし、対応する記載書類を選択肢にする */
+function docTypeSelectHTML(d,disabled){
+  const cur=d.cat||""; let inList=false;
+  const groups=ALL_COST_MODEL.map(g=>{ const docs=komokuDocTypes(g.komoku); if(!docs.length) return "";
+    return `<optgroup label="${esc(g.scope+"｜"+g.komoku)}">`+docs.map(t=>{ if(t===cur)inList=true; return `<option ${t===cur?"selected":""}>${esc(t)}</option>`; }).join("")+`</optgroup>`;
+  }).join("");
+  const head=cur?(inList?"":`<option selected>${esc(cur)}</option>`):`<option value="" selected>（未選択）</option>`;
+  return `<select class="in" ${disabled?"disabled":""} onchange="pnDoc('cat',this.value)">${head}${groups}</select>`;
 }
 /* 原価項目ピル（原価分類の色で表示。コスト分類＝原価項目の同義表示に使用） */
 function komokuPill(l){
@@ -4244,8 +4272,8 @@ function renderMaster(){
 /* コスト分類マスタ（コスト構造の真実源 CATS / CAT_DOCTYPES を直接編集＝即時反映） */
 function renderCostCats(){
   const rows=CATS.map(c=>{
-    const dts=DOC_TYPES.map(t=>{const on=(CAT_DOCTYPES[c]||[]).includes(t);
-      return `<span class="dt-chip ${on?"on":""}" onclick="masterToggleCatDocType('${esc(c)}','${esc(t)}')">${esc(t)}</span>`;}).join("");
+    const dtl=legacyCatDocTypes(c);
+    const dts=dtl.length?dtl.map(t=>`<span class="dt-chip on">${esc(t)}</span>`).join(""):`<span class="ccat-empty">—</span>`;
     const subs=SUBCATS_BY_CAT[c]||[];
     const subHtml=subs.length
       ? subs.map(s=>`<span class="ccat-sub" title="連携コード: ${esc(s.code)}"><span class="mono">${esc(s.code)}</span>${esc(s.label)}</span>`).join("")
@@ -4253,16 +4281,14 @@ function renderCostCats(){
     return `<div class="ccat-row">
       <div class="ccat-head">${catPill(c)}</div>
       <div class="ccat-body">
-        <div class="ccat-field"><span class="ccat-lab">想定書類タイプ</span>${dts}</div>
+        <div class="ccat-field"><span class="ccat-lab">想定書類（記載書類）</span>${dts}</div>
         <div class="ccat-field"><span class="ccat-lab">内訳（連携コード）</span>${subHtml}</div>
       </div>
     </div>`;
   }).join("");
-  const head=`<div class="pagehead"><div><h1>コスト分類</h1><p>原価区分（コスト構造）のマスタです。分類はシステム固定で、分類ごとに <b>想定書類タイプ</b>（書類タイプのヒント・コストモニター内訳集計に使用）を編集できます。<b>連携用の内訳コード</b>は外部サービス連携の契約キーのため、参照のみです。</p></div></div>`;
+  const head=`<div class="pagehead"><div><h1>コスト分類</h1><p>原価区分（コスト構造）のマスタです。分類はシステム固定で、<b>想定書類（記載書類）</b>は原価項目ごとの元データ書類名から自動集約した参照情報です。<b>連携用の内訳コード</b>は外部サービス連携の契約キーのため、参照のみです。</p></div></div>`;
   return head+`<div class="ccat-card">${rows}</div>`;
 }
-function masterToggleCatDocType(cat,dtype){ const arr=CAT_DOCTYPES[cat]||(CAT_DOCTYPES[cat]=[]);
-  const i=arr.indexOf(dtype); if(i>=0) arr.splice(i,1); else arr.push(dtype); render(); }
 function renderVehicleMaster(){
   const list=VEHICLE_MASTER.slice().sort((a,b)=>b.no-a.no);
   const per=state.masterPerPage;
