@@ -564,6 +564,8 @@
   .vt-metrics thead th.vm-cat{text-align:center;font-size:11px;font-weight:800;letter-spacing:.3px;box-shadow:inset 0 -1px 0 var(--line);height:34px;padding-top:0;padding-bottom:0;vertical-align:middle;box-sizing:border-box}
   .vt-metrics thead th.vm-label{background:#F3F5F2;font-size:10px;font-weight:700;line-height:1.3;color:var(--inkSoft);white-space:normal;vertical-align:bottom;max-width:132px;min-width:92px;top:34px}
   .vt-metrics thead th.vm-label.sum{color:var(--ink)}
+  .vt-metrics thead th.vm-label.sortable{cursor:pointer}
+  .vt-metrics thead th.vm-label .ar,.vt-metrics thead th.vm-label .ar-dim{margin-left:3px}
   .vt-metrics td.vm-col{text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--ink);white-space:nowrap}
   .vt-metrics td.vm-col.sum{font-weight:800}
   .vt-metrics td.vm-col.na{color:#9AA3AD}
@@ -3425,11 +3427,17 @@ function visibleVehicles(){
   let veh=allVeh.filter(v=>inTrash?state.vehTrash.has(v.key):!state.vehTrash.has(v.key));
   if(state.vehSort.key){
     const dir=state.vehSort.dir==="asc"?1:-1;
-    const val=v=>({target:v.target,
-      master:plateRegistered(v.target)?1:0,
-      total:v.total,last:v.last,count:v.count})[state.vehSort.key];
-    veh=veh.slice().sort((a,b)=>{const va=val(a),vb=val(b);
-      if(va<vb)return -dir; if(va>vb)return dir; return b.total-a.total;});
+    const sk=state.vehSort.key;
+    const mi=(typeof sk==="string"&&sk.indexOf("metric:")===0)?+sk.slice(7):null;
+    const val=v=>{
+      if(mi!=null){const f=vehicleMetrics(v).flatMap(g=>g.metrics)[mi]; return f?(+f.value||0):0;}
+      return ({target:v.target,
+        master:plateRegistered(v.target)?1:0,
+        total:v.total,last:v.last,count:v.count})[sk];
+    };
+    const keyed=veh.map(v=>({v,k:val(v)}));
+    keyed.sort((a,b)=>{if(a.k<b.k)return -dir; if(a.k>b.k)return dir; return b.v.total-a.v.total;});
+    veh=keyed.map(x=>x.v);
   }
   return veh;
 }
@@ -3743,8 +3751,15 @@ function renderVehIndividual(){
   const metricSchema=vehicleMetrics(pageVeh[0]);
   const groupHdr=metricSchema.map(g=>{const cs=greenCatStyle(g.cat);
     return `<th class="vm-cat grp-start" colspan="${g.metrics.length}" style="color:${cs.fg};background:${cs.bg}">${esc(g.cat)}</th>`;}).join("");
-  const labelHdr=metricSchema.map(g=>g.metrics.map((m,i)=>
-    `<th class="vm-label ${i===0?"grp-start":""} ${m.isSum?"sum":""}">${esc(m.label)}</th>`).join("")).join("");
+  let _mi=0;
+  const labelHdr=metricSchema.map(g=>g.metrics.map((m,i)=>{
+    const idx=_mi++;
+    const base=`vm-label ${i===0?"grp-start":""} ${m.isSum?"sum":""}`;
+    if(m.na) return `<th class="${base}">${esc(m.label)}</th>`; // "—"固定の項目は並び替え不可
+    const key="metric:"+idx;
+    const sorted=state.vehSort.key===key;
+    return `<th class="${base} sortable ${sorted?"sorted":""}" onclick="setVehSort('${key}')" title="この項目で並び替え"><span class="vm-lab-tx">${esc(m.label)}</span>${vehSortArrow(key)}</th>`;
+  }).join("")).join("");
 
   const table=`<div class="veh-card"><div class="tscroll"><table class="vt vt-metrics">
     <thead>
@@ -3756,18 +3771,21 @@ function renderVehIndividual(){
 }
 function setVehSort(key){const s=state.vehSort;
   if(s.key===key) s.dir=s.dir==="asc"?"desc":"asc";
-  else {s.key=key; s.dir=(key==="total"||key==="count")?"desc":"asc";}
+  else {s.key=key; s.dir=(key==="total"||key==="count"||(typeof key==="string"&&key.indexOf("metric:")===0))?"desc":"asc";}
   state.vehPage=1; render();}
+/* 個別モニターの並び替え矢印（昇順▲／降順▼／未選択⇅）。各ヘッダー共通。 */
+function vehSortArrow(key){
+  const a=state.vehSort.key===key;
+  return a?(state.vehSort.dir==="asc"?`<span class="ar">▲</span>`:`<span class="ar">▼</span>`):`<span class="ar-dim">⇅</span>`;
+}
 function thVeh(key,label,cls,rowspan){
   const a=state.vehSort.key===key;
-  const ar=a?(state.vehSort.dir==="asc"?`<span class="ar">▲</span>`:`<span class="ar">▼</span>`):`<span class="ar-dim">⇅</span>`;
-  return `<th ${rowspan?`rowspan="${rowspan}"`:""} class="sortable ${cls||""} ${a?"sorted":""}" onclick="setVehSort('${key}')"><span class="th-in">${label}${ar}</span></th>`;
+  return `<th ${rowspan?`rowspan="${rowspan}"`:""} class="sortable ${cls||""} ${a?"sorted":""}" onclick="setVehSort('${key}')"><span class="th-in">${label}${vehSortArrow(key)}</span></th>`;
 }
 /* 個別モニターの固定列ヘッダー（車番・累計コスト）。横スクロール時も左に固定する2段ヘッダー用。 */
 function thVehSticky(key,label,cls){
   const a=state.vehSort.key===key;
-  const ar=a?(state.vehSort.dir==="asc"?`<span class="ar">▲</span>`:`<span class="ar">▼</span>`):`<span class="ar-dim">⇅</span>`;
-  return `<th rowspan="2" class="sortable sticky-c ${cls||""} ${a?"sorted":""}" onclick="setVehSort('${key}')"><span class="th-in">${label}${ar}</span></th>`;
+  return `<th rowspan="2" class="sortable sticky-c ${cls||""} ${a?"sorted":""}" onclick="setVehSort('${key}')"><span class="th-in">${label}${vehSortArrow(key)}</span></th>`;
 }
 function toggleVeh(k){if(state.vehExpanded.has(k))state.vehExpanded.delete(k);else state.vehExpanded.add(k);render();}
 function setVehCategoryFilter(v){ state.vehCategoryFilter=v; state.vehPage=1; render(); }
