@@ -1074,6 +1074,42 @@
   .ai-pagebox .ai-tblwrap{border:none;border-top:1px solid var(--lineSoft);border-radius:0}
   .iv-pageno{font-size:9px;color:var(--inkSoft);font-weight:700;margin-left:6px}
   .iv-cont{margin-top:16px;text-align:right;font-size:11px;color:var(--inkSoft);font-weight:700}
+  /* ───── 在庫管理 ───── */
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
+  .seg button{border:none;background:none;padding:7px 14px;font-size:12.5px;font-weight:700;color:var(--inkSoft);cursor:pointer;font-family:var(--sans)}
+  .seg button+button{border-left:1px solid var(--lineSoft)}
+  .seg button:hover{background:var(--panel);color:var(--ink)}
+  .seg button.on{background:var(--greenSoft);color:var(--greenDark)}
+  .inv-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .inv-bar .sp{flex:1}
+  .inv-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 18px;margin-bottom:14px}
+  .inv-card>h3{margin:0 0 4px;font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .inv-card>.sub{margin:0 0 12px;font-size:12px;color:var(--inkSoft)}
+  .inv-badge{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .b-in{background:#E5EDFB;color:#1E55C8}
+  .b-out{background:#FBEFD8;color:#9A5A0E}
+  .b-open{background:#EAEDF1;color:#5A6472}
+  .b-ret{background:#E3F1EB;color:#0E5A40}
+  .b-loss{background:#F7E2DF;color:#B23A2E}
+  .pill-ok{background:#E3F1EB;color:#0E7A4B}
+  .pill-low{background:#F7E2DF;color:#B23A2E}
+  .pill-exp{background:#FBEFD8;color:#9A5A0E}
+  .inv-link{color:var(--green);cursor:pointer;border:none;background:none;font:inherit;font-weight:700;padding:0;text-decoration:underline dotted;text-underline-offset:2px}
+  .inv-link:hover{color:var(--greenDark)}
+  .barm{height:7px;border-radius:99px;background:var(--lineSoft);overflow:hidden;min-width:64px;margin-top:3px}
+  .barm>span{display:block;height:100%;border-radius:99px}
+  .inv-map{display:flex;flex-wrap:wrap;gap:8px}
+  .inv-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:9px;padding:6px 11px;font-size:12px;background:var(--panel)}
+  .inv-chip b{font-family:var(--mono);font-weight:800}
+  table.invt{width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px}
+  table.invt th{text-align:left;font-size:11px;color:var(--inkSoft);font-weight:700;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--panel)}
+  table.invt td{padding:9px 10px;border-bottom:1px solid var(--lineSoft);vertical-align:middle}
+  table.invt td.r,table.invt th.r{text-align:right;font-family:var(--mono)}
+  table.invt tr:last-child td{border-bottom:none}
+  table.invt tr.lowrow td{background:#FCF1EF}
+  .inv-flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--inkSoft);margin-bottom:14px;background:var(--greenSoft);border:1px solid var(--greenLine);border-radius:10px;padding:10px 14px}
+  .inv-flow b{color:var(--greenDark)}
+  .inv-flow .ar{color:var(--green);font-weight:800}
 </style>
 </head>
 <body>
@@ -1292,6 +1328,12 @@ const VEHICLE_COST_MODEL=[
   ]},
 ];
 const SITE_COST_MODEL=[
+  {bunrui:"変動費",komoku:"燃料費（自社タンク／ローリー仕入）",legacyCat:"燃料費",items:[
+    {label:"軽油（自社タンク）"},{label:"ガソリン（自社タンク）"},{label:"アドブルー（バルク）"},
+  ]},
+  {bunrui:"変動費",komoku:"タイヤ費（新品／夏冬／更生）",legacyCat:"修繕・維持費",items:[
+    {label:"新品タイヤ"},{label:"夏冬タイヤ（スタッドレス）"},{label:"更生タイヤ"},
+  ]},
   {bunrui:"固定費",komoku:"荷役関連費用",legacyCat:"調達コスト",items:[
     {label:"荷役作業委託費（積込・取卸）"},{label:"附帯作業費（仕分・検品等）"},
     {label:"荷役機材費（パレット・固縛資材・カゴ車）"},{label:"構内作業員人件費（自社対応分）"},
@@ -1415,7 +1457,9 @@ const KOMOKU_DOCS={
   "借入金利息":["返済予定表","金銭消費貸借契約書","借入金明細","利息計算書"],
   "通行料（道路使用料）":["ETC利用明細","領収書"],
   "フェリー航送料":["フェリー乗船券","フェリー会社請求書","乗船券","請求書"],
-  "荷役関連費用":["荷役業者請求書","購入請求書","レンタル請求書","賃金台帳","請求書"],
+  "燃料費（自社タンク／ローリー仕入）":["ローリー納品書","燃料仕入請求書","在庫出庫明細","タンク検尺記録"],
+  "タイヤ費（新品／夏冬／更生）":["タイヤ購入請求書","納品書","在庫出庫明細","更生加工請求書"],
+  "荷役関連費用":["荷役業者請求書","購入請求書","レンタル請求書","賃金台帳","在庫出庫明細","請求書"],
   "施設利用料（家賃等）":["賃貸借契約書","賃料請求書","公共料金請求書","検針票"],
   "施設賦課税（固定資産税等）":["固定資産税納税通知書","償却資産申告書","納税通知書"],
   "事務員等人件費":["給与明細","賃金台帳","賞与明細","社会保険料納入告知額","労働保険申告書","退職金規程","引当計算書"],
@@ -1699,6 +1743,125 @@ function baselineDocs(){
   }
   return out;
 }
+/* ═══════════════ 在庫管理：仕入→在庫→出庫（消費／装着／貸出）→棚卸 ═══════════════
+   拠点で在庫を保有し、出庫時に車両／案件へ配賦。出庫＝原価計上として拠点コスト・車両コストに連携する。
+   品目は4カテゴリ（燃料・タイヤ・荷役機材・車両消耗品/法定備品）。各 costItem は原価項目(komoku)の内訳に一致。 */
+const INV_MONTHS=["2026-03","2026-04","2026-05","2026-06"];
+const INV_CUR_YM="2026-06";
+const INV_TODAY="2026-06-23";
+const INV_CATS=[
+  {k:"fuel",   l:"燃料",                 komoku:"燃料費（自社タンク／ローリー仕入）", scope:"拠点", color:"#B87514", bg:"#FBEFD8", mode:"残量管理",     note:"自社タンク／ローリー仕入の残量管理。給油機・カード連携で車両別に出庫を自動記録"},
+  {k:"tire",   l:"タイヤ",               komoku:"タイヤ費（新品／夏冬／更生）",       scope:"拠点", color:"#157F73", bg:"#DCEFEC", mode:"ライフサイクル", note:"新品／夏冬／更生を区別。1本単位で装着車両・残溝・ローテーションを管理"},
+  {k:"equip",  l:"荷役機材",             komoku:"荷役関連費用",                       scope:"拠点", color:"#2563EB", bg:"#E5EDFB", mode:"貸出・回収",   note:"パレット・カゴ車・固縛資材の貸出／返却・所在・紛失を管理。購入＝原価計上"},
+  {k:"consum", l:"車両消耗品・法定備品", komoku:"消耗品費（車両消耗品・法定備品）",   scope:"拠点", color:"#6B4FA3", bg:"#ECE6F5", mode:"発注点・期限", note:"発注点アラート＋法定備品の期限管理（発炎筒の使用期限・消火器点検）。取付時に車両へ紐付け"},
+];
+const INV_CAT=Object.fromEntries(INV_CATS.map(c=>[c.k,c]));
+/* 品目マスタ：規格・単位・標準単価・発注先・保管拠点・発注点。tire はサイズ／適合車両、法定備品は期限。
+   open=期首在庫(3/1), inBase=1回あたり仕入量, inEvery=仕入周期(月), outBase=月あたり出庫量, shrink=棚卸の実地差異(ロス) */
+const INV_ITEMS=[
+  /* 燃料（L） */
+  {id:"F-DSL-NGO",cat:"fuel",name:"軽油",spec:"自社タンク 10kL",unit:"L",price:152,supplier:"ENEOSウイング（ローリー）",office:"名古屋営業所",reorder:2500,cap:10000,costItem:"軽油（自社タンク）",open:6000,inBase:5000,inEvery:1,outBase:5200,shrink:120},
+  {id:"F-DSL-OKZ",cat:"fuel",name:"軽油",spec:"自社タンク 5kL",unit:"L",price:150,supplier:"出光リテール販売（ローリー）",office:"岡崎営業所",reorder:1500,cap:5000,costItem:"軽油（自社タンク）",open:3200,inBase:3200,inEvery:1,outBase:3100},
+  {id:"F-DSL-YKK",cat:"fuel",name:"軽油",spec:"自社タンク 5kL",unit:"L",price:151,supplier:"出光リテール販売（ローリー）",office:"四日市営業所",reorder:1500,cap:5000,costItem:"軽油（自社タンク）",open:3000,inBase:3500,inEvery:2,outBase:2200},
+  {id:"F-ADB-NGO",cat:"fuel",name:"アドブルー",spec:"バルク 1kL",unit:"L",price:33,supplier:"出光リテール販売",office:"名古屋営業所",reorder:300,cap:1000,costItem:"アドブルー（バルク）",open:800,inBase:600,inEvery:2,outBase:450},
+  {id:"F-GAS-NGO",cat:"fuel",name:"ガソリン",spec:"自社タンク 2kL",unit:"L",price:168,supplier:"ENEOSウイング（ローリー）",office:"名古屋営業所",reorder:400,cap:2000,costItem:"ガソリン（自社タンク）",open:1000,inBase:800,inEvery:2,outBase:430},
+  /* タイヤ（本） */
+  {id:"T-NEW-BIG-NGO",cat:"tire",name:"新品タイヤ",spec:"11R22.5 16PR",unit:"本",price:48000,supplier:"ブリヂストン中部",office:"名古屋営業所",reorder:8,costItem:"新品タイヤ",size:"11R22.5",fit:"大型",open:20,inBase:16,inEvery:2,outBase:9},
+  {id:"T-WIN-BIG-OKZ",cat:"tire",name:"夏冬タイヤ（スタッドレス）",spec:"11R22.5 スタッドレス",unit:"本",price:52000,supplier:"ブリヂストン中部",office:"岡崎営業所",reorder:6,costItem:"夏冬タイヤ（スタッドレス）",size:"11R22.5",fit:"大型",open:14,inBase:12,inEvery:2,outBase:7},
+  {id:"T-RTR-BIG-NGO",cat:"tire",name:"更生タイヤ",spec:"11R22.5 リトレッド",unit:"本",price:28000,supplier:"中部リトレッド",office:"名古屋営業所",reorder:4,costItem:"更生タイヤ",size:"11R22.5",fit:"大型",open:10,inBase:6,inEvery:2,outBase:5,shrink:1},
+  {id:"T-NEW-SML-ICH",cat:"tire",name:"新品タイヤ",spec:"195/85R16 小型",unit:"本",price:18000,supplier:"オートバックス法人",office:"一宮営業所",reorder:8,costItem:"新品タイヤ",size:"195/85R16",fit:"小型",open:18,inBase:14,inEvery:2,outBase:8},
+  /* 荷役機材（枚／台／本）：貸出・回収管理 */
+  {id:"E-PLT-NGO",cat:"equip",name:"パレット",spec:"T11型 1100×1100",unit:"枚",price:1800,supplier:"日本パレットレンタル",office:"名古屋営業所",reorder:80,costItem:"荷役機材費（パレット・固縛資材・カゴ車）",open:320,inBase:120,inEvery:3,outBase:90,shrink:6},
+  {id:"E-CAGE-OKZ",cat:"equip",name:"カゴ車（ロールボックス）",spec:"標準W型",unit:"台",price:12000,supplier:"三甲",office:"岡崎営業所",reorder:12,costItem:"荷役機材費（パレット・固縛資材・カゴ車）",open:40,inBase:10,inEvery:3,outBase:14,shrink:3},
+  {id:"E-LASH-ICH",cat:"equip",name:"ラッシングベルト",spec:"5t ラチェット式",unit:"本",price:2500,supplier:"アンクラジャパン",office:"一宮営業所",reorder:20,costItem:"荷役機材費（パレット・固縛資材・カゴ車）",open:60,inBase:24,inEvery:3,outBase:12},
+  /* 車両消耗品・法定備品（個／本／L） */
+  {id:"C-BAT-NGO",cat:"consum",name:"バッテリー",spec:"105D31R",unit:"個",price:16000,supplier:"GSユアサ販売",office:"名古屋営業所",reorder:5,costItem:"バッテリー／ワイパー／電球",open:12,inBase:8,inEvery:2,outBase:4},
+  {id:"C-WIP-NGO",cat:"consum",name:"ワイパーゴム",spec:"汎用 各サイズ",unit:"本",price:800,supplier:"カー用品法人",office:"名古屋営業所",reorder:24,costItem:"バッテリー／ワイパー／電球",open:60,inBase:30,inEvery:2,outBase:16},
+  {id:"C-CLNT-NGO",cat:"consum",name:"クーラント・ウォッシャー液",spec:"LLC／ウォッシャー液",unit:"L",price:420,supplier:"カー用品法人",office:"名古屋営業所",reorder:30,costItem:"クーラント・ウォッシャー液",open:80,inBase:40,inEvery:2,outBase:22},
+  {id:"C-FLR-NGO",cat:"consum",name:"発炎筒",spec:"法定備品・使用期限あり",unit:"本",price:350,supplier:"カー用品法人",office:"名古屋営業所",reorder:30,costItem:"発炎筒・三角表示板・タイヤチェーン",open:70,inBase:0,inEvery:9,outBase:14,expiry:"2026-09"},
+  {id:"C-TRI-OKZ",cat:"consum",name:"三角表示板",spec:"法定備品",unit:"個",price:2200,supplier:"カー用品法人",office:"岡崎営業所",reorder:5,costItem:"発炎筒・三角表示板・タイヤチェーン",open:8,inBase:6,inEvery:9,outBase:3},
+  {id:"C-EXT-NGO",cat:"consum",name:"消火器",spec:"法定備品・点検期限あり",unit:"本",price:4500,supplier:"防災テック中部",office:"名古屋営業所",reorder:3,costItem:"発炎筒・三角表示板・タイヤチェーン",open:9,inBase:4,inEvery:9,outBase:2,inspect:"2026-08"},
+];
+const INV_ITEM=Object.fromEntries(INV_ITEMS.map(it=>[it.id,it]));
+/* タイヤ装着（1本単位のライフサイクル：装着車両・位置・装着日・走行距離・残溝） */
+const INV_TIRE_MOUNT=[
+  {plate:"名古屋100か5678",pos:"前左",  item:"新品タイヤ 11R22.5", size:"11R22.5",   mountedAt:"2025-11-10",km:42000,tread:5.5},
+  {plate:"名古屋100か5678",pos:"前右",  item:"新品タイヤ 11R22.5", size:"11R22.5",   mountedAt:"2025-11-10",km:42000,tread:5.8},
+  {plate:"三河800さ9012",  pos:"後左外",item:"更生タイヤ 11R22.5", size:"11R22.5",   mountedAt:"2025-08-02",km:88000,tread:3.2},
+  {plate:"岡崎100か2233",  pos:"全輪",  item:"夏冬タイヤ（スタッドレス）",size:"11R22.5",mountedAt:"2025-12-05",km:31000,tread:9.0},
+  {plate:"豊橋800せ4455",  pos:"後右外",item:"新品タイヤ 195/85R16",size:"195/85R16",mountedAt:"2026-02-20",km:15000,tread:7.1},
+];
+function _invVehicles(office){ return FLEET.filter(p=>officeFromPlate(p)===office); }
+const INV_LOANERS=["丸和ロジ 春日井DC","西濃運輸 一宮支店","カインズ小牧 物流C","自社 中継拠点"];
+function _invParty(it,seed,mi){
+  if(it.cat==="equip"){ return INV_LOANERS[(seed+mi)%INV_LOANERS.length]; }
+  const vs=_invVehicles(it.office); if(!vs.length) return "（拠点内共通）";
+  return vs[(seed+mi)%vs.length];
+}
+function _invRnd(seed){ const x=Math.sin(seed*12.9898)*43758.5453; return x-Math.floor(x); }
+/* 入出庫トランザクションを決定論で生成し、現在庫・評価額を算定 */
+let _INV=null;
+function buildInventory(){
+  if(_INV) return _INV;
+  const moves=[]; let mid=1;
+  const dd=(ym,d)=>`${ym}-${String(d).padStart(2,"0")}`;
+  const nextYm=ym=>{ const i=INV_MONTHS.indexOf(ym); return i>=0&&i<INV_MONTHS.length-1?INV_MONTHS[i+1]:null; };
+  INV_ITEMS.forEach(it=>{
+    const cat=INV_CAT[it.cat], seed=_hash(it.id)%9973;
+    const base={itemId:it.id,cat:it.cat,office:it.office,komoku:cat.komoku,costItem:it.costItem,unit:it.unit};
+    moves.push({id:mid++,...base,type:"open",ym:"2026-03",date:"2026-03-01",qty:it.open,unitPrice:it.price,amount:it.open*it.price,party:"期首在庫",note:"期首"});
+    INV_MONTHS.forEach((ym,mi)=>{
+      // 入庫（仕入）：inEvery 周期で発生（inBase>0 のとき）
+      if(it.inBase>0 && mi%it.inEvery===0){
+        const up=Math.round(it.price*(0.97+_invRnd(seed+mi*3)*0.06));
+        moves.push({id:mid++,...base,type:"in",ym,date:dd(ym,5),qty:it.inBase,unitPrice:up,amount:it.inBase*up,party:it.supplier,note:"仕入"});
+      }
+      // 出庫（消費／装着／貸出）
+      if(it.outBase>0){
+        const q=Math.max(1,Math.round(it.outBase*(0.82+_invRnd(seed+mi*7)*0.42)));
+        const party=_invParty(it,seed,mi);
+        moves.push({id:mid++,...base,type:"out",ym,date:dd(ym,18),qty:q,unitPrice:it.price,amount:q*it.price,party,
+          note:it.cat==="equip"?"貸出":(it.cat==="tire"?"装着":"配賦")});
+        // 荷役機材は翌月に一部返却（回収管理）
+        if(it.cat==="equip"){ const nx=nextYm(ym); if(nx){ const r=Math.round(q*0.7); if(r>0) moves.push({id:mid++,...base,type:"in",ym:nx,date:dd(nx,3),qty:r,unitPrice:it.price,amount:r*it.price,party,note:"返却"}); } }
+      }
+    });
+    // 紛失（荷役機材）：カゴ車で1件
+    if(it.id==="E-CAGE-OKZ") moves.push({id:mid++,...base,type:"loss",ym:"2026-05",date:"2026-05-22",qty:2,unitPrice:it.price,amount:2*it.price,party:"丸和ロジ 春日井DC",note:"紛失"});
+  });
+  _INV={items:INV_ITEMS,moves};
+  return _INV;
+}
+/* 1品目の在庫サマリー：現在庫・移動平均評価額・貸出中・直近入出庫 */
+function invStock(id){
+  const ms=buildInventory().moves.filter(m=>m.itemId===id);
+  let qty=0,inQ=0,inA=0,onLoan=0;
+  ms.forEach(m=>{
+    if(m.type==="open"||m.type==="in"){ qty+=m.qty; if(m.type==="open"||m.note==="仕入"){inQ+=m.qty;inA+=m.amount;} }
+    else if(m.type==="out"){ qty-=m.qty; }
+    else if(m.type==="loss"){ qty-=m.qty; }
+    if(m.cat==="equip"){ if(m.type==="out") onLoan+=m.qty; else if(m.type==="in"&&m.note==="返却") onLoan-=m.qty; }
+  });
+  const avg=inQ>0?inA/inQ:0;
+  return {qty,onLoan:Math.max(0,onLoan),avg,value:Math.round(qty*avg)};
+}
+/* 出庫＝原価計上の判定：消費財は出庫、荷役機材は購入＋紛失を費用計上 */
+function invIsCost(m){ if(m.cat==="equip") return (m.type==="in"&&m.note==="仕入")||m.type==="loss"; return m.type==="out"; }
+/* 月→日数差（期限管理） */
+function _daysUntil(d){ if(!d)return null; const t=new Date(d.length<=7?d+"-01":d), now=new Date(INV_TODAY); return Math.round((t-now)/86400000); }
+/* 在庫アラート（発注点割れ・法定備品期限・タイヤ残溝・機材紛失） */
+function invAlerts(){
+  const out=[];
+  INV_ITEMS.forEach(it=>{ const s=invStock(it.id);
+    if(s.qty<it.reorder) out.push({lv:s.qty<=it.reorder*0.5?"red":"yellow",cat:it.cat,t:`${it.name}（${it.office}）が発注点割れ`,d:`現在庫 ${s.qty}${it.unit} ／ 発注点 ${it.reorder}${it.unit}`,act:"要発注"});
+    const de=_daysUntil(it.expiry); if(de!=null&&de<=120) out.push({lv:de<=30?"red":"yellow",cat:it.cat,t:`${it.name}（法定備品）の使用期限が接近`,d:`期限 ${it.expiry} まで約${de}日`,act:"交換手配"});
+    const di=_daysUntil(it.inspect); if(di!=null&&di<=120) out.push({lv:di<=30?"red":"yellow",cat:it.cat,t:`${it.name}の点検期限が接近`,d:`点検期限 ${it.inspect} まで約${di}日`,act:"点検手配"});
+  });
+  INV_TIRE_MOUNT.forEach(t=>{ if(t.tread<=3.5) out.push({lv:t.tread<=2.5?"red":"yellow",cat:"tire",t:`タイヤ残溝あと僅か（${t.plate} ${t.pos}）`,d:`残溝 ${t.tread}mm ／ ${t.item}`,act:"交換推奨"}); });
+  buildInventory().moves.filter(m=>m.type==="loss").forEach(m=>{ const it=INV_ITEM[m.itemId]; out.push({lv:"yellow",cat:m.cat,t:`${it.name}の紛失（${m.party}）`,d:`${m.qty}${it.unit}・${yen(m.amount)}相当 ／ ${m.date}`,act:"回収・確認"}); });
+  return out;
+}
+
 /* ───── サンプル：車両コスト・拠点コストの数カ月分（決定論） ───── */
 function sampleCostDocs(){
   const out=[]; const ym2=ym=>ym.replace('-',''); const dd=(ym,day)=>`${ym}-${String(day).padStart(2,"0")}`;
@@ -1732,13 +1895,17 @@ function sampleCostDocs(){
         SL("委託運賃（支払運賃）","庸車費（外注運賃）",dd(ym,25),210000+oi*30000+mi*5000),
         SL("荷役作業委託費（積込・取卸）","荷役関連費用",dd(ym,25),82000+oi*9000),
       ]});
-    out.push({name:`消耗品購入_${office}_${ym2(ym)}.pdf`, vendor:"カー用品・整備部品ほか", cat:"購入レシート", status:"連携済み", category:office,
-      lines:[
-        SL("バッテリー／ワイパー／電球","消耗品費（車両消耗品・法定備品）",dd(ym,12),18000+oi*2000+mi*500),
-        SL("クーラント・ウォッシャー液","消耗品費（車両消耗品・法定備品）",dd(ym,12),4200+oi*300),
-        SL("発炎筒・三角表示板・タイヤチェーン","消耗品費（車両消耗品・法定備品）",dd(ym,12),6800+oi*400),
-      ]});
   }); });
+  /* 在庫の出庫＝原価計上を拠点コストへ連携（在庫管理タブと同一データ源）。office×月×costItem で集計 */
+  const invAgg={};
+  buildInventory().moves.filter(invIsCost).forEach(m=>{
+    const k=m.office+"|"+m.ym; (invAgg[k]||(invAgg[k]={}));
+    const c=invAgg[k][m.costItem]||(invAgg[k][m.costItem]={komoku:m.komoku,amount:0}); c.amount+=m.amount;
+  });
+  Object.keys(invAgg).forEach(k=>{ const [office,ym]=k.split("|"); const g=invAgg[k];
+    const lines=Object.keys(g).map(ci=>SL(ci,g[ci].komoku,dd(ym,20),Math.round(g[ci].amount)));
+    out.push({name:`在庫消費_原価計上_${office}_${ym2(ym)}.pdf`, vendor:"在庫管理（出庫＝原価計上）", cat:"在庫出庫明細", status:"連携済み", category:office, lines});
+  });
   /* 四半期：貨物保険（3月・6月） */
   ["2026-03","2026-06"].forEach(ym=>{ CATEGORIES.slice(0,3).forEach((office,oi)=>{
     out.push({name:`貨物保険_損害保険_${office}_${ym2(ym)}.pdf`, vendor:"損害保険会社", cat:"保険料請求書", status:"連携済み", category:office,
@@ -1852,6 +2019,7 @@ let state={
   aiConfirm:null,   // 書類を開いた時の明細確認ステップ
   statusSel:[],   // 選択中のステータス（複数可・空＝すべて）
   categoryFilter:"all", vehCategoryFilter:"all", vehTab:"monitor",
+  invTab:"stock", invCat:"all", invOffice:"all",
   chartOffice:"all", chart2Cat:"燃料費", chart2Klass:"all",
   trash:false, docTrashAction:null,
   q:"",
@@ -3950,8 +4118,9 @@ function renderVehicles(){
     <button class="upl-tab ${state.vehTab!=="individual"&&state.vehTab!=="sites"?"active":""}" onclick="setVehTab('monitor')">コストモニター</button>
     <button class="upl-tab ${state.vehTab==="individual"?"active":""}" onclick="setVehTab('individual')">車両コスト</button>
     <button class="upl-tab ${state.vehTab==="sites"?"active":""}" onclick="setVehTab('sites')">拠点コスト</button>
+    <button class="upl-tab ${state.vehTab==="inventory"?"active":""}" onclick="setVehTab('inventory')">在庫管理</button>
   </div>`;
-  return tabs+(state.vehTab==="individual"?renderVehIndividual():state.vehTab==="sites"?renderVehSites():renderVehMonitor());
+  return tabs+(state.vehTab==="individual"?renderVehIndividual():state.vehTab==="sites"?renderVehSites():state.vehTab==="inventory"?renderInventory():renderVehMonitor());
 }
 /* ───── コストモニタータブ：全車両（ゴミ箱を除く）のコスト動向サマリー。絞り込み・ゴミ箱の影響を受けない。 ───── */
 /* ───── 異常検知：各対象を自身の過去で判定（①スパイク ②トレンド ③構成比＋補正） ───── */
@@ -4323,6 +4492,163 @@ function renderVehSites(){
 function toggleVeh(k){if(state.vehExpanded.has(k))state.vehExpanded.delete(k);else state.vehExpanded.add(k);render();}
 function setVehCategoryFilter(v){ state.vehCategoryFilter=v; state.vehPage=1; render(); }
 function setVehTab(t){ state.vehTab=t; render(); }
+/* ═══════════════ 在庫管理タブ ═══════════════ */
+function setInvTab(t){ state.invTab=t; render(); }
+function setInvCat(v){ state.invCat=v; render(); }
+function setInvOffice(v){ state.invOffice=v; render(); }
+function _invFilteredItems(){ return INV_ITEMS.filter(it=>(state.invCat==="all"||it.cat===state.invCat)&&(state.invOffice==="all"||it.office===state.invOffice)); }
+function _invFilteredCats(){ return INV_CATS.filter(c=>state.invCat==="all"||c.k===state.invCat); }
+function invCatPill(k){ const c=INV_CAT[k]; return `<span class="catpill" style="color:${c.color};background:${c.bg}">${esc(c.l)}</span>`; }
+function renderInventory(){
+  const head=`<div class="pagehead pagehead-veh"><div><p>仕入→在庫→出庫（消費・装着・貸出）→棚卸 の在庫サイクルを管理します。在庫は<b>拠点</b>で保有し、出庫時に<b>車両／案件</b>へ配賦。<b>出庫＝原価計上</b>として「拠点コスト」「車両コスト」に連携されます。</p></div></div>`;
+  const tab=state.invTab||"stock";
+  const segs=[["stock","在庫照会"],["moves","入出庫履歴"],["stocktake","棚卸"],["master","品目マスタ"]];
+  const seg=`<div class="inv-bar"><div class="seg">${segs.map(([k,l])=>`<button class="${tab===k?"on":""}" onclick="setInvTab('${k}')">${esc(l)}</button>`).join("")}</div>
+    <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 品目区分</span><select onchange="setInvCat(this.value)"><option value="all" ${state.invCat==="all"?"selected":""}>すべて</option>${INV_CATS.map(c=>`<option value="${c.k}" ${state.invCat===c.k?"selected":""}>${esc(c.l)}</option>`).join("")}</select></div>
+    <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 保管拠点</span><select onchange="setInvOffice(this.value)"><option value="all" ${state.invOffice==="all"?"selected":""}>全拠点</option>${CATEGORIES.map(o=>`<option value="${esc(o)}" ${state.invOffice===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>
+  </div>`;
+  const body=tab==="moves"?invMovesView():tab==="stocktake"?invStocktakeView():tab==="master"?invMasterView():invStockView();
+  return head+invKpis()+invAlertStrip()+seg+body;
+}
+function invKpis(){
+  const items=_invFilteredItems();
+  let val=0,low=0,inAmt=0,outAmt=0;
+  items.forEach(it=>{ const s=invStock(it.id); val+=s.value; if(s.qty<it.reorder) low++; });
+  buildInventory().moves.forEach(m=>{
+    if(state.invCat!=="all"&&m.cat!==state.invCat) return;
+    if(state.invOffice!=="all"&&m.office!==state.invOffice) return;
+    if(m.ym!==INV_CUR_YM) return;
+    if(m.type==="in"&&m.note==="仕入") inAmt+=m.amount;
+    if(invIsCost(m)) outAmt+=m.amount;
+  });
+  const k=(l,v,sub)=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}${sub?`<small> ${sub}</small>`:""}</div></div>`;
+  return `<div class="kpis">
+    ${k("在庫評価額（移動平均）",yen(val))}
+    ${k("発注点割れ",`${low}`,"品目")}
+    ${k("当月入庫額（仕入）",yen(inAmt))}
+    ${k("当月出庫＝原価計上",yen(outAmt))}
+  </div>`;
+}
+function invAlertStrip(){
+  let a=invAlerts();
+  if(state.invCat!=="all") a=a.filter(x=>x.cat===state.invCat);
+  if(!a.length) return "";
+  const ic=lv=>I.alert(lv==="red"?"#B23A2E":"#B87514",15);
+  const rows=a.slice(0,8).map(x=>`<div class="inv-chip" style="border-color:${x.lv==="red"?"#E7B7B0":"#EAD9AE"};background:${x.lv==="red"?"#FCF1EF":"#FBF5E7"}">${ic(x.lv)}<span><b style="font-family:var(--sans)">${esc(x.t)}</b><br><span style="color:var(--inkSoft)">${esc(x.d)}</span></span><span class="inv-badge ${x.lv==="red"?"b-loss":"b-out"}">${esc(x.act)}</span></div>`).join("");
+  return `<div class="inv-card"><h3>${I.alert("#B87514",16)} アラート（発注点・期限・残溝・紛失）<span class="inv-badge b-loss" style="margin-left:6px">${a.length}件</span></h3><div class="inv-map">${rows}</div></div>`;
+}
+function invFlowNote(){
+  return `<div class="inv-flow">${I.boxes("#0E5A40",15)} <b>拠点で在庫保有</b> <span class="ar">→</span> 出庫で <b>車両／案件へ配賦</b> <span class="ar">→</span> <b>出庫＝原価計上</b>（${INV_CATS.map(c=>invCatPill(c.k)).join(" ")}）<span class="ar">→</span> <button class="inv-link" onclick="setVehTab('sites')">拠点コストを見る</button> ／ <button class="inv-link" onclick="setVehTab('individual')">車両コストを見る</button></div>`;
+}
+function invStatusCell(it,s){
+  const de=_daysUntil(it.expiry), di=_daysUntil(it.inspect);
+  if(s.qty<it.reorder) return `<span class="inv-badge pill-low">発注点割れ</span>`;
+  if(de!=null&&de<=120) return `<span class="inv-badge pill-exp">期限 残${de}日</span>`;
+  if(di!=null&&di<=120) return `<span class="inv-badge pill-exp">点検 残${di}日</span>`;
+  return `<span class="inv-badge pill-ok">正常</span>`;
+}
+function invStockTable(c){
+  const items=_invFilteredItems().filter(it=>it.cat===c.k);
+  if(!items.length) return "";
+  const rows=items.map(it=>{ const s=invStock(it.id);
+    const ref=it.cap?it.cap:Math.max(it.reorder*3,s.qty);
+    const pct=Math.max(4,Math.min(100,Math.round(s.qty/ref*100)));
+    const col=s.qty<it.reorder?"#B23A2E":(s.qty<it.reorder*1.5?"#B87514":c.color);
+    let memo="";
+    if(it.cat==="equip") memo=`貸出中 <b style="font-family:var(--mono)">${s.onLoan}</b>${it.unit}`;
+    else if(it.cat==="tire") memo=`${esc(it.size)}・${esc(it.fit)}`;
+    else if(it.cat==="fuel") memo=`タンク容量 ${it.cap.toLocaleString("ja-JP")}L・残量 ${Math.min(100,Math.round(s.qty/it.cap*100))}%`;
+    else if(it.expiry) memo=`使用期限 ${esc(it.expiry)}`;
+    else if(it.inspect) memo=`点検期限 ${esc(it.inspect)}`;
+    return `<tr class="${s.qty<it.reorder?"lowrow":""}">
+      <td><b>${esc(it.name)}</b><br><span style="color:var(--inkSoft);font-size:11px">${esc(it.spec)}</span></td>
+      <td>${esc(it.office)}</td>
+      <td class="r">${s.qty.toLocaleString("ja-JP")}<span style="color:var(--inkFaint);font-size:10px"> ${esc(it.unit)}</span><div class="barm"><span style="width:${pct}%;background:${col}"></span></div></td>
+      <td class="r">${it.reorder.toLocaleString("ja-JP")}</td>
+      <td class="r">¥${Math.round(it.price).toLocaleString("ja-JP")}</td>
+      <td class="r">${yen(s.value)}</td>
+      <td>${invStatusCell(it,s)}</td>
+      <td style="font-size:11.5px;color:var(--inkSoft)">${memo}</td></tr>`;
+  }).join("");
+  return `<div class="inv-card"><h3>${invCatPill(c.k)} ${esc(c.l)} <span class="sub" style="margin:0 0 0 4px">／ ${esc(c.mode)}</span></h3><p class="sub">${esc(c.note)}　原価項目：<b>${esc(c.komoku)}</b></p>
+    <div class="tscroll"><table class="invt"><thead><tr><th>品目・規格</th><th>保管拠点</th><th class="r">現在庫</th><th class="r">発注点</th><th class="r">標準単価</th><th class="r">在庫評価額</th><th>状態</th><th>摘要</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function invTireDetail(){
+  const rows=INV_TIRE_MOUNT.map(t=>{ const low=t.tread<=3.5;
+    return `<tr class="${low?"lowrow":""}"><td><button class="inv-link" onclick="setVehTab('individual')">${esc(t.plate)}</button></td><td>${esc(t.pos)}</td><td>${esc(t.item)}</td><td>${esc(t.mountedAt)}</td><td class="r">${t.km.toLocaleString("ja-JP")} km</td><td class="r">${t.tread.toFixed(1)} mm</td><td>${low?`<span class="inv-badge pill-low">交換推奨</span>`:`<span class="inv-badge pill-ok">良好</span>`}</td></tr>`;
+  }).join("");
+  return `<div class="inv-card"><h3>${I.car?I.car("#157F73",16):""} タイヤ ライフサイクル（装着中）</h3><p class="sub">1本単位で装着車両・位置・走行距離・残溝を管理。残溝3.5mm以下は交換推奨。車両をクリックで車両コストへ。</p>
+    <div class="tscroll"><table class="invt"><thead><tr><th>装着車両</th><th>位置</th><th>銘柄</th><th>装着日</th><th class="r">走行距離</th><th class="r">残溝</th><th>状態</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function invLoanDetail(){
+  const byParty={};
+  buildInventory().moves.filter(m=>m.cat==="equip"&&(state.invOffice==="all"||m.office===state.invOffice)).forEach(m=>{
+    const it=INV_ITEM[m.itemId]; const key=m.party+"｜"+it.name;
+    const o=byParty[key]||(byParty[key]={party:m.party,item:it.name,unit:it.unit,on:0,lost:0});
+    if(m.type==="out") o.on+=m.qty; else if(m.type==="in"&&m.note==="返却") o.on-=m.qty; else if(m.type==="loss") o.lost+=m.qty;
+  });
+  const list=Object.values(byParty).filter(o=>o.on>0||o.lost>0).sort((a,b)=>b.on-a.on);
+  if(!list.length) return "";
+  const rows=list.map(o=>`<tr class="${o.lost>0?"lowrow":""}"><td>${esc(o.party)}</td><td>${esc(o.item)}</td><td class="r">${Math.max(0,o.on)} ${esc(o.unit)}</td><td class="r">${o.lost>0?`<span style="color:var(--alert);font-weight:800">${o.lost} ${esc(o.unit)}</span>`:"—"}</td></tr>`).join("");
+  return `<div class="inv-card"><h3>${I.boxes("#2563EB",16)} 荷役機材 貸出先別 所在</h3><p class="sub">「どこに何個あるか」を可視化。返却管理で回収漏れ・紛失を検知します。</p>
+    <div class="tscroll"><table class="invt"><thead><tr><th>貸出先</th><th>品目</th><th class="r">貸出中</th><th class="r">紛失</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function invExpiryDetail(){
+  const items=_invFilteredItems().filter(it=>it.cat==="consum"&&(it.expiry||it.inspect));
+  if(!items.length) return "";
+  const rows=items.map(it=>{ const isInsp=!!it.inspect; const d=it.expiry||it.inspect; const days=_daysUntil(d);
+    const low=days<=30, warn=days<=120;
+    return `<tr class="${low?"lowrow":""}"><td><b>${esc(it.name)}</b></td><td>${esc(it.office)}</td><td>${isInsp?"点検期限":"使用期限"}</td><td>${esc(d)}</td><td class="r">残 約${days}日</td><td>${low?`<span class="inv-badge pill-low">至急</span>`:warn?`<span class="inv-badge pill-exp">手配</span>`:`<span class="inv-badge pill-ok">余裕</span>`}</td></tr>`;
+  }).join("");
+  return `<div class="inv-card"><h3>${I.alert("#6B4FA3",16)} 法定備品 期限管理</h3><p class="sub">発炎筒の使用期限・消火器の点検期限を管理。期限切れによる法令違反・整備不良を防止します。</p>
+    <div class="tscroll"><table class="invt"><thead><tr><th>品目</th><th>保管拠点</th><th>種別</th><th>期限</th><th class="r">残日数</th><th>状態</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function invStockView(){
+  const cats=_invFilteredCats();
+  let html=invFlowNote();
+  cats.forEach(c=>{ html+=invStockTable(c);
+    if(c.k==="tire") html+=invTireDetail();
+    if(c.k==="equip") html+=invLoanDetail();
+    if(c.k==="consum") html+=invExpiryDetail();
+  });
+  return html;
+}
+function invMovesView(){
+  let ms=buildInventory().moves.filter(m=>(state.invCat==="all"||m.cat===state.invCat)&&(state.invOffice==="all"||m.office===state.invOffice));
+  ms=ms.slice().sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:b.id-a.id).slice(0,60);
+  const badge=m=>{ if(m.type==="open")return`<span class="inv-badge b-open">期首</span>`;
+    if(m.type==="loss")return`<span class="inv-badge b-loss">紛失</span>`;
+    if(m.type==="out")return`<span class="inv-badge b-out">出庫・${esc(m.note)}</span>`;
+    if(m.note==="返却")return`<span class="inv-badge b-ret">返却</span>`;
+    return`<span class="inv-badge b-in">入庫・仕入</span>`; };
+  const partyCell=m=>{
+    if(m.type==="out"&&m.cat!=="equip"&&officeFromPlate(m.party)) return `<button class="inv-link" onclick="setVehTab('individual')">${esc(m.party)}</button>`;
+    return esc(m.party); };
+  const costCell=m=>invIsCost(m)?`<span class="inv-badge b-out">原価計上</span> <span style="color:var(--inkSoft);font-size:10.5px">${esc(m.komoku)}</span>`:`<span style="color:var(--inkFaint)">—</span>`;
+  const rows=ms.map(m=>{ const it=INV_ITEM[m.itemId];
+    return `<tr><td>${esc(m.date)}</td><td>${invCatPill(m.cat)}</td><td>${badge(m)}</td><td><b>${esc(it.name)}</b> <span style="color:var(--inkSoft);font-size:11px">${esc(it.spec)}</span></td><td>${esc(m.office)}</td><td class="r">${(m.type==="out"||m.type==="loss")?"−":"+"}${m.qty.toLocaleString("ja-JP")} ${esc(it.unit)}</td><td class="r">¥${Math.round(m.unitPrice).toLocaleString("ja-JP")}</td><td class="r">${yen(m.amount)}</td><td>${partyCell(m)}</td><td>${costCell(m)}</td></tr>`;
+  }).join("");
+  return invFlowNote()+`<div class="inv-card"><h3>${I.docs("#177D58",16)} 入出庫履歴 <span class="sub" style="margin-left:4px">直近60件</span></h3><p class="sub">請求書・納品書からの自動取込、給油機・デジタコ連携、バーコード/QRでの入出庫を想定。出庫はそのまま原価計上に連携。</p>
+    <div class="tscroll"><table class="invt"><thead><tr><th>日付</th><th>区分</th><th>入出庫</th><th>品目</th><th>拠点</th><th class="r">数量</th><th class="r">単価</th><th class="r">金額</th><th>仕入先／配賦先</th><th>原価連携</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function invStocktakeView(){
+  const items=_invFilteredItems();
+  let totLoss=0;
+  const rows=items.map(it=>{ const s=invStock(it.id); const shrink=it.shrink||0; const actual=s.qty-shrink; const lossAmt=Math.round(shrink*s.avg); totLoss+=lossAmt;
+    return `<tr class="${shrink>0?"lowrow":""}"><td><b>${esc(it.name)}</b> <span style="color:var(--inkSoft);font-size:11px">${esc(it.spec)}</span></td><td>${invCatPill(it.cat)}</td><td>${esc(it.office)}</td><td class="r">${s.qty.toLocaleString("ja-JP")} ${esc(it.unit)}</td><td class="r">${actual.toLocaleString("ja-JP")} ${esc(it.unit)}</td><td class="r">${shrink>0?`<span style="color:var(--alert);font-weight:800">−${shrink} ${esc(it.unit)}</span>`:"±0"}</td><td class="r">${shrink>0?`<span style="color:var(--alert)">−${yen(lossAmt)}</span>`:"—"}</td><td>${shrink>0?`<span class="inv-badge pill-low">差異あり</span>`:`<span class="inv-badge pill-ok">一致</span>`}</td></tr>`;
+  }).join("");
+  return `<div class="inv-card"><h3>${I.checkc?I.checkc("#177D58",16):I.check("#177D58",16)} 棚卸（理論在庫 × 実地在庫）</h3><p class="sub">理論在庫と実地在庫を突合し、差異＝ロスを記録。燃料ロス・カゴ車紛失・消耗品の差異を可視化します。棚卸ロス合計：<b style="color:var(--alert)">−${yen(totLoss)}</b></p>
+    <div class="tscroll"><table class="invt"><thead><tr><th>品目・規格</th><th>区分</th><th>保管拠点</th><th class="r">理論在庫</th><th class="r">実地在庫</th><th class="r">差異</th><th class="r">ロス金額</th><th>状態</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function invMasterView(){
+  const items=_invFilteredItems();
+  const rows=items.map(it=>{ const c=INV_CAT[it.cat];
+    const extra=it.cat==="tire"?`${esc(it.size)} / ${esc(it.fit)}`:(it.expiry?`使用期限 ${esc(it.expiry)}`:it.inspect?`点検 ${esc(it.inspect)}`:it.cap?`容量 ${it.cap.toLocaleString("ja-JP")}${esc(it.unit)}`:"—");
+    return `<tr><td><b>${esc(it.name)}</b></td><td>${esc(it.spec)}</td><td>${invCatPill(it.cat)}</td><td>${esc(it.unit)}</td><td class="r">¥${Math.round(it.price).toLocaleString("ja-JP")}</td><td>${esc(it.supplier)}</td><td>${esc(it.office)}</td><td class="r">${it.reorder.toLocaleString("ja-JP")}</td><td style="font-size:11px;color:var(--inkSoft)">${extra}</td><td style="font-size:11px">${esc(it.costItem)}</td></tr>`;
+  }).join("");
+  return `<div class="inv-card"><h3>${I.db("#177D58",16)} 品目マスタ</h3><p class="sub">品名・規格・単位・標準単価・発注先・保管拠点・発注点を管理。タイヤはサイズ／適合車両、法定備品は期限。各品目は原価項目（komoku）の内訳に連動します。</p>
+    <div class="tscroll"><table class="invt"><thead><tr><th>品名</th><th>規格</th><th>区分</th><th>単位</th><th class="r">標準単価</th><th>発注先</th><th>保管拠点</th><th class="r">発注点</th><th>固有情報</th><th>原価項目内訳</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
 /* ───── 車両のゴミ箱（確認ステップ＋変更履歴） ───── */
 function toggleVehTrash(){ state.vehTrashView=!state.vehTrashView; state.vehPage=1; render(); }
 function _findVeh(key){ return buildVehicles("all").find(v=>v.key===key); }
