@@ -1082,6 +1082,8 @@
   .seg button.on{background:var(--greenSoft);color:var(--greenDark)}
   .inv-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .inv-bar .sp{flex:1}
+  .inv-scroll{flex:1;min-height:0;overflow-y:auto;padding-bottom:8px}
+  .inv-scroll>.inv-card:last-child{margin-bottom:0}
   .inv-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 18px;margin-bottom:14px}
   .inv-card>h3{margin:0 0 4px;font-size:13.5px;display:flex;align-items:center;gap:8px}
   .inv-card>.sub{margin:0 0 12px;font-size:12px;color:var(--inkSoft)}
@@ -4533,7 +4535,7 @@ function renderInventory(){
     <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 保管拠点</span><select onchange="setInvOffice(this.value)"><option value="all" ${state.invOffice==="all"?"selected":""}>全拠点</option>${CATEGORIES.map(o=>`<option value="${esc(o)}" ${state.invOffice===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>
   </div>`;
   const body=tab==="moves"?invMovesView():invStockView();
-  return head+seg+body;
+  return head+seg+`<div class="inv-scroll">${body}</div>`;
 }
 function invFlowNote(){
   return `<div class="inv-flow">${I.boxes("#0E5A40",15)} <b>拠点で在庫保有</b> <span class="ar">→</span> 出庫＝原価計上。<b>燃料・タイヤの車両配賦分</b>は <button class="inv-link" onclick="setVehTab('individual')">車両コスト</button> へ、<b>拠点共通・取付・荷役機材</b>は <button class="inv-link" onclick="setVehTab('sites')">拠点コスト</button> へ自動連携します。</div>`;
