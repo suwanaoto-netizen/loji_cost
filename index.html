@@ -4154,7 +4154,9 @@ function renderVehMonitor(){
   /* 上部にサマリーKPI、続いて最優先の異常検知・買い替えサイン／TCO を縦に配置 */
   const anomalyPanel=renderAnomalyPanel(detectAnomalies());
   const tcoPanel=renderTcoPanel(vehicles);
-  return head+kpis+anomalyPanel+tcoPanel;
+  /* 下部（スクロールで表示）：原価項目構成比の推移／営業所別 原価項目推移グラフ */
+  const charts=`<div class="mon-charts">${renderCostTrendBar()}${renderOfficeLineChart()}</div>`;
+  return head+kpis+anomalyPanel+tcoPanel+charts;
 }
 /* ───── 個別モニタータブ：車両（車番）ごとのコスト一覧。絞り込み・ゴミ箱・変更履歴を提供する。 ───── */
 function renderVehIndividual(){
