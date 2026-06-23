@@ -138,6 +138,8 @@
   .btn-ghost{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--line);color:var(--ink);border-radius:9px;padding:9px 15px;font-size:13.5px;font-weight:700;cursor:pointer}
   .btn-ghost:hover{border-color:var(--greenLine);color:var(--greenDark)}
   .btn-hist{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid var(--line);color:var(--inkSoft);border-radius:7px;padding:5px 9px;font-size:11.5px;font-weight:700;cursor:pointer}
+  .btn-hist.green{background:var(--green);border-color:var(--green);color:#fff}
+  .btn-hist.green:hover{background:var(--greenDark);border-color:var(--greenDark);color:#fff}
   .btn-hist:hover{background:#F5F6F8;color:var(--ink);border-color:#CFD5DD}
   .btn-hist .bh-ct{font-size:10px;font-family:var(--mono);font-weight:700;color:var(--inkSoft);background:#EEF0F3;border-radius:999px;padding:0 6px;margin-left:1px}
 
@@ -251,6 +253,16 @@
   .switch .knob{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:999px;background:#fff;transition:.18s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
   .switch.on .knob{left:20px}
   .m-foot{display:flex;justify-content:flex-end;gap:10px;padding:16px 20px;border-top:1px solid var(--lineSoft)}
+  /* コスト管理 CSV モーダル */
+  .csv-warn{background:#FBF6E3;border:1px solid #E8DCA8;border-radius:8px;padding:12px 15px;font-size:12.5px;color:#7A5310;line-height:1.9;font-weight:700}
+  .csv-sjis{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);margin-top:14px;cursor:pointer}
+  .dz-pick{margin-top:14px;background:#EEF0F3;color:var(--inkSoft);font-size:13px;font-weight:700;padding:9px 16px;border-radius:7px}
+  .costcsv-fname{font-size:13.5px;font-weight:800;color:var(--ink);margin-bottom:8px}
+  .costcsv-preview{margin-top:16px;max-height:320px;overflow:auto;border:1px solid var(--lineSoft);border-radius:8px}
+  .costcsv-preview .vd-tbl{border:none;border-radius:0;font-size:11.5px}
+  .costcsv-preview .vd-tbl th{position:sticky;top:0;z-index:1;white-space:nowrap}
+  .costcsv-preview .vd-tbl td{white-space:nowrap}
+  .costcsv-more{font-size:11.5px;color:var(--inkSoft);padding:8px 12px;border-top:1px solid var(--lineSoft)}
   .btn-cancel{background:#fff;border:1px solid #DCDFE6;color:var(--ink);border-radius:8px;padding:9px 18px;font-size:13.5px;font-weight:700;cursor:pointer}
   .btn-upload{background:var(--green);border:none;color:#fff;border-radius:8px;padding:9px 22px;font-size:14px;font-weight:800;cursor:pointer}
   .btn-upload:hover:not(:disabled){filter:brightness(1.05)}
@@ -3868,6 +3880,8 @@ function renderVehIndividual(){
     <button class="btn-hist" onclick="openChangelog()" title="コスト内訳の変更履歴">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>
       変更履歴${clogUnseen>0?`<span class="bh-ct">${clogUnseen}</span>`:""}</button>
+    <button class="btn-hist green" onclick="openCostCsv('download','vehicle')" title="車両コストをCSVでダウンロード">${I.download("#fff",13)} CSVダウンロード</button>
+    <button class="btn-hist green" onclick="openCostCsv('import','vehicle')" title="車両コストをCSVから取り込み">${I.cloud("#fff",16)} CSVインポート</button>
   </div>`;
   const filterBar=`<div class="veh-filters"><span class="vf-l">絞り込み</span>${catSel}${periodCtrl}</div>`;
 
@@ -3964,6 +3978,9 @@ function costBunruiHdr(schema){
 function renderVehSites(){
   const head=`<div class="pagehead pagehead-veh">
     <div><p>連携済みの書類から、拠点（営業所）ごとに拠点コスト（荷役・施設・庸車・一般管理費など）を原価分類・原価項目別に集計します。1営業所＝1レコードで表示します。</p></div>
+    <div class="ph-spacer"></div>
+    <button class="btn-hist green" onclick="openCostCsv('download','site')" title="拠点コストをCSVでダウンロード">${I.download("#fff",13)} CSVダウンロード</button>
+    <button class="btn-hist green" onclick="openCostCsv('import','site')" title="拠点コストをCSVから取り込み">${I.cloud("#fff",16)} CSVインポート</button>
   </div>`;
   const note=`<div class="veh-note-bar">${I.alert("#B87514",14)} 拠点コストの明細データは連携準備中です。各原価項目の金額が連携されると、ここに自動で積み上がります。</div>`;
   const schema=siteMetrics("");
@@ -4424,11 +4441,100 @@ function downloadMasterCsv(){
   toast("CSVをダウンロードしました");
 }
 
+/* ───── コスト管理 CSV（車両コスト／拠点コスト）ダウンロード・インポート ───── */
+function openCostCsv(mode,scope){ state.costCsv={mode,scope,charset:"utf8bom",sjis:false,fileName:null,headers:[],rows:[]}; renderOverlay(); }
+function closeCostCsv(){ state.costCsv=null; renderOverlay(); }
+function setCostCsvCharset(v){ if(state.costCsv) state.costCsv.charset=v; }
+function toggleCostCsvSjis(c){ if(state.costCsv) state.costCsv.sjis=!!c; }
+function _costCsvScopeSpec(scope){ return scope==="site"
+  ? {origin:"営業所",model:SITE_COST_MODEL,fname:"拠点コスト"}
+  : {origin:"車両番号",model:VEHICLE_COST_MODEL,fname:"車両コスト"}; }
+function _costCsvDefaultDate(){ const ds=buildVehicles("all",null).map(v=>v.last).filter(Boolean).sort(); return ds[ds.length-1]||"2026-05-31"; }
+/* CSV列：起点項目（必須）・発生日（必須）＋全明細。 */
+function costCsvHeaders(scope){ const sp=_costCsvScopeSpec(scope);
+  const cols=[sp.origin+"（必須）","発生日（必須）"]; if(scope==="vehicle") cols.push("営業所");
+  sp.model.forEach(g=>g.items.forEach(it=>cols.push(it.label))); return cols; }
+function costCsvRows(scope){ const sp=_costCsvScopeSpec(scope); const dflt=_costCsvDefaultDate();
+  if(scope==="site"){ return CATEGORIES.map(o=>{ const row=[o,dflt]; SITE_COST_MODEL.forEach(g=>g.items.forEach(()=>row.push(""))); return row; }); }
+  const vehicles=buildVehicles("all",null).filter(v=>!state.vehTrash.has(v.key));
+  return vehicles.map(v=>{ const office=(v.lines.find(l=>l.office)||{}).office||"";
+    const row=[v.target, v.last||dflt, office];
+    vehicleMetrics(v).forEach(g=>g.metrics.forEach(mm=>{ if(mm.isSum)return; row.push(mm.na?"":mm.value); }));
+    return row; }); }
+function costCsvText(scope){ const q=s=>`"${String(s==null?"":s).replace(/"/g,'""')}"`;
+  const h=costCsvHeaders(scope),r=costCsvRows(scope);
+  return h.map(q).join(",")+"\r\n"+r.map(x=>x.map(q).join(",")).join("\r\n"); }
+function _downloadCsv(text,fname,bom){ const blob=new Blob([(bom?"﻿":"")+text],{type:"text/csv;charset=utf-8"});
+  const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=fname;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); }
+function costCsvDoDownload(){ const c=state.costCsv; if(!c)return; const sp=_costCsvScopeSpec(c.scope);
+  _downloadCsv(costCsvText(c.scope), `${sp.fname}_${_costCsvDefaultDate().slice(0,7)}.csv`, c.charset!=="utf8");
+  toast("CSVをダウンロードしました"); closeCostCsv(); }
+function costCsvDownloadSample(){ const c=state.costCsv; if(!c)return; const sp=_costCsvScopeSpec(c.scope);
+  _downloadCsv(costCsvText(c.scope), `${sp.fname}_sample.csv`, true); toast("サンプルCSVをダウンロードしました"); }
+function _parseCsv(text){ text=String(text||"").replace(/^﻿/,''); const rows=[]; let row=[],cur="",q=false;
+  for(let i=0;i<text.length;i++){ const ch=text[i];
+    if(q){ if(ch==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; }
+    else { if(ch==='"')q=true; else if(ch===','){row.push(cur);cur="";} else if(ch==='\n'){row.push(cur);rows.push(row);row=[];cur="";} else if(ch!=='\r')cur+=ch; } }
+  if(cur!==""||row.length){ row.push(cur); rows.push(row); }
+  return rows.filter(r=>!(r.length===1&&r[0].trim()==="")); }
+function costCsvPickFile(){ const el=document.getElementById("costcsv-file"); if(el)el.click(); }
+function costCsvFiles(files){ const c=state.costCsv; if(!c||!files||!files[0])return; const f=files[0];
+  const reader=new FileReader();
+  reader.onload=e=>{ const rows=_parseCsv(e.target.result); c.fileName=f.name; c.headers=rows[0]||[]; c.rows=rows.slice(1); renderOverlay(); };
+  reader.readAsText(f, c.sjis?"Shift_JIS":"UTF-8"); }
+function costCsvDrop(e){ e.preventDefault(); const dz=e.currentTarget; if(dz)dz.classList.remove("drag"); costCsvFiles(e.dataTransfer.files); }
+function costCsvUpload(){ const c=state.costCsv; if(!c||!c.rows.length)return; toast(`${c.rows.length}件のコストを取り込みました（デモ）`); closeCostCsv(); }
+function renderCostCsvModal(){
+  const c=state.costCsv; if(!c) return ""; const sp=_costCsvScopeSpec(c.scope);
+  if(c.mode==="download"){
+    return `<div class="ovl anim" onclick="if(event.target===this)closeCostCsv()"><div class="modal" style="width:min(680px,100%)">
+      <div class="m-head"><span class="t">CSVダウンロード（${esc(sp.fname)}）</span><button class="x" onclick="closeCostCsv()">${I.x("#5A6472",18)}</button></div>
+      <div class="m-body">
+        <p style="font-size:12.5px;color:var(--inkSoft);margin:0 0 16px">※ 検索フィルターはダウンロードデータには反映されません。</p>
+        <div class="fld"><label>文字コード</label>
+          <select class="in" onchange="setCostCsvCharset(this.value)">
+            <option value="utf8bom">エクセル対応（UTF-8 BOM）</option>
+            <option value="utf8">UTF-8（BOMなし）</option>
+          </select></div>
+      </div>
+      <div class="m-foot"><button class="btn-ghost" onclick="closeCostCsv()">キャンセル</button>
+        <button class="btn-green" onclick="costCsvDoDownload()">${I.download("#fff",14)} CSVダウンロード</button></div>
+    </div></div>`;
+  }
+  const hasFile=!!c.fileName, origin=c.scope==="site"?"営業所":"車両番号";
+  const preview=c.rows.slice(0,50);
+  const table=(hasFile&&c.headers.length)?`<div class="costcsv-preview"><table class="vd-tbl"><thead><tr>${c.headers.map(h=>`<th>${esc(h)}</th>`).join("")}</tr></thead>
+    <tbody>${preview.length?preview.map(r=>`<tr>${c.headers.map((_,i)=>`<td>${esc(r[i]==null?"":r[i])}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${c.headers.length}" style="text-align:center;color:var(--inkSoft);padding:14px">データ行がありません</td></tr>`}</tbody></table>
+    ${c.rows.length>preview.length?`<div class="costcsv-more">ほか ${c.rows.length-preview.length} 行</div>`:""}</div>`:"";
+  const dzInner=hasFile
+    ? `<div class="costcsv-fname">${esc(c.fileName)}</div>${I.cloud("#C0C7CF",44)}`
+    : `<div style="color:var(--inkSoft);font-size:13px;margin-bottom:8px">ファイルを選択するか、ドラッグアンドドロップしてください。</div>${I.cloud("#C0C7CF",44)}`;
+  return `<div class="ovl anim" onclick="if(event.target===this)closeCostCsv()"><div class="modal" style="width:min(980px,100%)">
+    <div class="m-head"><span class="t">CSVインポート（${esc(sp.fname)}）</span><button class="x" onclick="closeCostCsv()">${I.x("#5A6472",18)}</button></div>
+    <div class="m-body" style="max-height:74vh;overflow:auto">
+      <p style="font-size:13px;margin:0 0 12px;line-height:1.7">サンプルをダウンロードして編集、もしくはCSVダウンロードで取得したファイルを編集してアップロードしてください。<b>${origin}</b>と<b>発生日</b>は必須項目です。${origin}・発生日ごとに各原価項目の金額を登録・更新します。</p>
+      <div class="csv-warn">
+        <div>1. CSVの内容で、${origin}・発生日ごとに各原価項目の金額を登録・更新します。</div>
+        <div>2. CSV形式が古いと取り込めない場合があります。最新のサンプルCSVをダウンロードしてお試しください。</div>
+      </div>
+      <div style="text-align:right;margin:12px 0"><button class="btn-green" onclick="costCsvDownloadSample()">サンプルダウンロード</button></div>
+      <input type="file" id="costcsv-file" accept=".csv" style="display:none" onchange="costCsvFiles(this.files)">
+      <div class="dropzone" onclick="costCsvPickFile()" ondragover="uplDragOver(event)" ondragleave="uplDragLeave(event)" ondrop="costCsvDrop(event)">
+        ${dzInner}<div class="dz-pick">ファイルを選択</div></div>
+      ${table}
+      <label class="csv-sjis"><input type="checkbox" ${c.sjis?"checked":""} onchange="toggleCostCsvSjis(this.checked)"> 文字コード：Shift-JIS</label>
+    </div>
+    <div class="m-foot"><button class="btn-ghost" onclick="closeCostCsv()">キャンセル</button>
+      <button class="btn-green" ${hasFile&&c.rows.length?"":"disabled"} onclick="costCsvUpload()">アップロード</button></div>
+  </div></div>`;
+}
+
 /* ───── オーバーレイ・トースト ───── */
 let _ovKind="";
 function renderOverlay(){
   const ov=document.getElementById("overlay");
-  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": "";
+  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": state.costCsv?"costcsv": "";
   state._ovFresh = (kind!=="" && kind!==_ovKind); // 同じオーバーレイの再描画ではアニメさせない
   _ovKind=kind;
   let h="";
@@ -4443,6 +4549,7 @@ function renderOverlay(){
   else if(state.changelogOpen) h=renderChangelog();
   else if(state.vehEditKey) h=renderVehEditModal();
   else if(state.masterEdit) h=renderMasterEditModal();
+  else if(state.costCsv) h=renderCostCsvModal();
   if(state.reflectConfirm) h+=renderReflectConfirm(); // 既存オーバーレイの上に確認モーダルを重ねる
   if(state.enterConfirm) h+=renderEnterConfirm();
   if(state.officeConfirm) h+=renderOfficeConfirm();
