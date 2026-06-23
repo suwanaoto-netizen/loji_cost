@@ -1790,7 +1790,7 @@ const INV_TIRE_MOUNT=[
   {plate:"岡崎100か2233",  pos:"全輪",  item:"夏冬タイヤ（スタッドレス）",size:"11R22.5",mountedAt:"2025-12-05",km:31000,tread:9.0},
   {plate:"豊橋800せ4455",  pos:"後右外",item:"新品タイヤ 195/85R16",size:"195/85R16",mountedAt:"2026-02-20",km:15000,tread:7.1},
 ];
-function _invVehicles(office){ return FLEET.filter(p=>officeFromPlate(p)===office); }
+function _invVehicles(office){ const ps=VEHICLE_MASTER.filter(v=>v.plate&&v.office===office).map(v=>v.plate); return ps.length?ps:FLEET.filter(p=>officeFromPlate(p)===office); }
 const INV_LOANERS=["丸和ロジ 春日井DC","西濃運輸 一宮支店","カインズ小牧 物流C","自社 中継拠点"];
 function _invParty(it,seed,mi){
   if(it.cat==="equip"){ return INV_LOANERS[(seed+mi)%INV_LOANERS.length]; }
@@ -1817,12 +1817,31 @@ function buildInventory(){
       }
       // 出庫（消費／装着／貸出）
       if(it.outBase>0){
-        const q=Math.max(1,Math.round(it.outBase*(0.82+_invRnd(seed+mi*7)*0.42)));
-        const party=_invParty(it,seed,mi);
-        moves.push({id:mid++,...base,type:"out",ym,date:dd(ym,18),qty:q,unitPrice:it.price,amount:q*it.price,party,
-          note:it.cat==="equip"?"貸出":(it.cat==="tire"?"装着":"配賦")});
-        // 荷役機材は翌月に一部返却（回収管理）
-        if(it.cat==="equip"){ const nx=nextYm(ym); if(nx){ const r=Math.round(q*0.7); if(r>0) moves.push({id:mid++,...base,type:"in",ym:nx,date:dd(nx,3),qty:r,unitPrice:it.price,amount:r*it.price,party,note:"返却"}); } }
+        const total=Math.max(1,Math.round(it.outBase*(0.82+_invRnd(seed+mi*7)*0.42)));
+        if(it.cat==="equip"){
+          // 荷役機材：貸出（拠点保有→取引先）。原価は購入時に拠点計上、ここでは在庫の移動のみ
+          const party=_invParty(it,seed,mi);
+          moves.push({id:mid++,...base,type:"out",ym,date:dd(ym,18),qty:total,unitPrice:it.price,amount:total*it.price,party,allocTo:"拠点",note:"貸出"});
+          const nx=nextYm(ym); if(nx){ const r=Math.round(total*0.7); if(r>0) moves.push({id:mid++,...base,type:"in",ym:nx,date:dd(nx,3),qty:r,unitPrice:it.price,amount:r*it.price,party,note:"返却"}); }
+        } else if(it.cat==="consum"){
+          // 車両消耗品・法定備品：取付車両へ紐付け。原価は拠点コストに計上（車両側に対応原価項目が無いため）
+          const party=_invParty(it,seed,mi);
+          moves.push({id:mid++,...base,type:"out",ym,date:dd(ym,18),qty:total,unitPrice:it.price,amount:total*it.price,party,allocTo:"拠点",note:"取付"});
+        } else {
+          // 燃料・タイヤ：在庫を車両へ配賦＝車両コストへ計上。複数車両へ分配し、配賦しきれない分は拠点共通として拠点コストに残す
+          const vs=_invVehicles(it.office);
+          const commonQ=Math.max(0,Math.round(total*0.25));
+          let rem=total-commonQ;
+          const n=vs.length?Math.min(it.cat==="tire"?2:3,vs.length):0;
+          for(let j=0;j<n&&rem>0;j++){
+            const plate=vs[(seed+mi+j*3)%vs.length];
+            const q=(j===n-1)?rem:Math.max(1,Math.round(rem/(n-j)*(0.8+_invRnd(seed+mi*5+j)*0.5)));
+            const qq=Math.min(rem,q); rem-=qq; if(qq<=0)continue;
+            moves.push({id:mid++,...base,type:"out",ym,date:dd(ym,15+j),qty:qq,unitPrice:it.price,amount:qq*it.price,party:plate,allocTo:"車両",note:it.cat==="tire"?"装着":"配賦"});
+          }
+          const commonTotal=commonQ+rem; // 配分端数も拠点共通へ寄せる
+          if(commonTotal>0) moves.push({id:mid++,...base,type:"out",ym,date:dd(ym,20),qty:commonTotal,unitPrice:it.price,amount:commonTotal*it.price,party:"（拠点共通）",allocTo:"拠点",note:"拠点共通"});
+        }
       }
     });
     // 紛失（荷役機材）：カゴ車で1件
@@ -1846,6 +1865,16 @@ function invStock(id){
 }
 /* 出庫＝原価計上の判定：消費財は出庫、荷役機材は購入＋紛失を費用計上 */
 function invIsCost(m){ if(m.cat==="equip") return (m.type==="in"&&m.note==="仕入")||m.type==="loss"; return m.type==="out"; }
+/* 拠点在庫の払出品目 → 車両コストの原価分類(cat)・明細名。車両へ配賦した出庫はこのマッピングで車両コストに計上する。
+   明細名はキーワードで車両コストの内訳セル（給油＝軽油/ガソリン、尿素水＝アドブルー、タイヤ）に正しく振り分けられる。 */
+const INV_VEH_COST={
+  "軽油（自社タンク）":{cat:"燃料費",item:"軽油 給油（自社タンク払出）"},
+  "ガソリン（自社タンク）":{cat:"燃料費",item:"ガソリン 給油（自社タンク払出）"},
+  "アドブルー（バルク）":{cat:"燃料費",item:"アドブルー補充（バルク払出）"},
+  "新品タイヤ":{cat:"修繕・維持費",item:"新品タイヤ 装着（在庫払出）"},
+  "夏冬タイヤ（スタッドレス）":{cat:"修繕・維持費",item:"スタッドレスタイヤ 装着（在庫払出）"},
+  "更生タイヤ":{cat:"修繕・維持費",item:"更生タイヤ 装着（在庫払出）"},
+};
 /* 月→日数差（期限管理） */
 function _daysUntil(d){ if(!d)return null; const t=new Date(d.length<=7?d+"-01":d), now=new Date(INV_TODAY); return Math.round((t-now)/86400000); }
 
@@ -1883,15 +1912,24 @@ function sampleCostDocs(){
         SL("荷役作業委託費（積込・取卸）","荷役関連費用",dd(ym,25),82000+oi*9000),
       ]});
   }); });
-  /* 在庫の出庫＝原価計上を拠点コストへ連携（在庫管理タブと同一データ源）。office×月×costItem で集計 */
-  const invAgg={};
+  /* 在庫の出庫＝原価計上（在庫管理タブと同一データ源）。
+     車両配賦分（燃料・タイヤ）は車両コストへ、拠点共通・取付・荷役購入分は拠点コストへ連携。office×月で集計。 */
+  const siteAgg={}, vehAgg={};
   buildInventory().moves.filter(invIsCost).forEach(m=>{
-    const k=m.office+"|"+m.ym; (invAgg[k]||(invAgg[k]={}));
-    const c=invAgg[k][m.costItem]||(invAgg[k][m.costItem]={komoku:m.komoku,amount:0}); c.amount+=m.amount;
+    const k=m.office+"|"+m.ym;
+    if(m.allocTo==="車両" && INV_VEH_COST[m.costItem]){ (vehAgg[k]||(vehAgg[k]=[])).push(m); }
+    else { (siteAgg[k]||(siteAgg[k]={})); const c=siteAgg[k][m.costItem]||(siteAgg[k][m.costItem]={komoku:m.komoku,amount:0}); c.amount+=m.amount; }
   });
-  Object.keys(invAgg).forEach(k=>{ const [office,ym]=k.split("|"); const g=invAgg[k];
+  Object.keys(siteAgg).forEach(k=>{ const [office,ym]=k.split("|"); const g=siteAgg[k];
     const lines=Object.keys(g).map(ci=>SL(ci,g[ci].komoku,dd(ym,20),Math.round(g[ci].amount)));
-    out.push({name:`在庫消費_原価計上_${office}_${ym2(ym)}.pdf`, vendor:"在庫管理（出庫＝原価計上）", cat:"在庫出庫明細", status:"連携済み", category:office, lines});
+    if(lines.length) out.push({name:`在庫消費_拠点計上_${office}_${ym2(ym)}.pdf`, vendor:"在庫管理（出庫＝原価計上）", cat:"在庫出庫明細", status:"連携済み", category:office, lines});
+  });
+  Object.keys(vehAgg).forEach(k=>{ const [office,ym]=k.split("|");
+    const byVehItem={};
+    vehAgg[k].forEach(m=>{ const mp=INV_VEH_COST[m.costItem]; const kk=m.party+"｜"+mp.item;
+      const o=byVehItem[kk]||(byVehItem[kk]={plate:m.party,cat:mp.cat,item:mp.item,amount:0}); o.amount+=m.amount; });
+    const lines=Object.values(byVehItem).map(o=>L(o.item,o.plate,o.cat,dd(ym,16),Math.round(o.amount),.98));
+    if(lines.length) out.push({name:`在庫配賦_車両別_${office}_${ym2(ym)}.pdf`, vendor:"在庫管理（出庫→車両配賦）", cat:"在庫出庫明細", status:"連携済み", category:office, lines});
   });
   /* 四半期：貨物保険（3月・6月） */
   ["2026-03","2026-06"].forEach(ym=>{ CATEGORIES.slice(0,3).forEach((office,oi)=>{
@@ -4498,7 +4536,7 @@ function renderInventory(){
   return head+seg+body;
 }
 function invFlowNote(){
-  return `<div class="inv-flow">${I.boxes("#0E5A40",15)} <b>拠点で在庫保有</b> <span class="ar">→</span> 出庫で <b>車両／案件へ配賦</b> <span class="ar">→</span> <b>出庫＝原価計上</b>（${INV_CATS.map(c=>invCatPill(c.k)).join(" ")}）<span class="ar">→</span> <button class="inv-link" onclick="setVehTab('sites')">拠点コストを見る</button> ／ <button class="inv-link" onclick="setVehTab('individual')">車両コストを見る</button></div>`;
+  return `<div class="inv-flow">${I.boxes("#0E5A40",15)} <b>拠点で在庫保有</b> <span class="ar">→</span> 出庫＝原価計上。<b>燃料・タイヤの車両配賦分</b>は <button class="inv-link" onclick="setVehTab('individual')">車両コスト</button> へ、<b>拠点共通・取付・荷役機材</b>は <button class="inv-link" onclick="setVehTab('sites')">拠点コスト</button> へ自動連携します。</div>`;
 }
 function invStatusCell(it,s){
   const de=_daysUntil(it.expiry), di=_daysUntil(it.inspect);
@@ -4582,9 +4620,11 @@ function invMovesView(){
     if(m.note==="返却")return`<span class="inv-badge b-ret">返却</span>`;
     return`<span class="inv-badge b-in">入庫・仕入</span>`; };
   const partyCell=m=>{
-    if(m.type==="out"&&m.cat!=="equip"&&officeFromPlate(m.party)) return `<button class="inv-link" onclick="setVehTab('individual')">${esc(m.party)}</button>`;
+    if(m.allocTo==="車両"&&officeFromPlate(m.party)) return `<button class="inv-link" onclick="setVehTab('individual')">${esc(m.party)}</button>`;
     return esc(m.party); };
-  const costCell=m=>invIsCost(m)?`<span class="inv-badge b-out">原価計上</span> <span style="color:var(--inkSoft);font-size:10.5px">${esc(m.komoku)}</span>`:`<span style="color:var(--inkFaint)">—</span>`;
+  const costCell=m=>{ if(!invIsCost(m)) return `<span style="color:var(--inkFaint)">—</span>`;
+    if(m.allocTo==="車両"&&INV_VEH_COST[m.costItem]) return `<button class="inv-link" onclick="setVehTab('individual')">車両コストへ計上</button> <span style="color:var(--inkSoft);font-size:10.5px">${esc(INV_VEH_COST[m.costItem].cat)}</span>`;
+    return `<button class="inv-link" onclick="setVehTab('sites')">拠点コストへ計上</button> <span style="color:var(--inkSoft);font-size:10.5px">${esc(m.komoku)}</span>`; };
   const rows=ms.map(m=>{ const it=INV_ITEM[m.itemId];
     return `<tr><td>${esc(m.date)}</td><td>${invCatPill(m.cat)}</td><td>${badge(m)}</td><td><b>${esc(it.name)}</b> <span style="color:var(--inkSoft);font-size:11px">${esc(it.spec)}</span></td><td>${esc(m.office)}</td><td class="r">${(m.type==="out"||m.type==="loss")?"−":"+"}${m.qty.toLocaleString("ja-JP")} ${esc(it.unit)}</td><td class="r">¥${Math.round(m.unitPrice).toLocaleString("ja-JP")}</td><td class="r">${yen(m.amount)}</td><td>${partyCell(m)}</td><td>${costCell(m)}</td></tr>`;
   }).join("");
