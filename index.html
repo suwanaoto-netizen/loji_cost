@@ -729,9 +729,14 @@
   .an-row{display:flex;align-items:center;gap:11px;padding:10px 10px;border-radius:9px;cursor:pointer;border-left:3px solid transparent}
   .an-row:hover{background:#F6FBF8}
   .an-row .an-dot{width:9px;height:9px;border-radius:50%;flex:none;background:#B23A2E}
-  .an-row.sev-mid .an-dot{background:#D08A1E}
-  .an-row.sev-low .an-dot{background:#C9A227}
-  .an-row.sev-high{border-left-color:#E0B8B2}
+  .an-row.lv-yellow .an-dot{background:#D08A1E}
+  .an-row.lv-red{border-left-color:#E0B8B2}
+  .an-row.lv-yellow{border-left-color:#E8D6A8}
+  .an-lv{font-size:10px;font-weight:800;border-radius:5px;padding:1px 6px}
+  .an-lv.red{color:#B23A2E;background:var(--alertSoft)}
+  .an-lv.yellow{color:#8A5310;background:var(--amberSoft)}
+  .crit-pop{width:360px;max-width:78vw;line-height:1.7;text-align:left;font-weight:600}
+  .an-tip{margin-left:2px}
   .an-main{flex:1;min-width:0}
   .an-l1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .an-scope{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:800;border-radius:6px;padding:1px 7px}
@@ -751,7 +756,10 @@
   .tco-share{font-family:var(--mono);font-size:11px;color:var(--inkSoft);font-weight:700}
   .tco-sign{display:inline-flex;align-items:center;font-size:11px;font-weight:800;color:#B23A2E;background:var(--alertSoft);border-radius:999px;padding:2px 10px}
   .tco-rise{font-size:11px;font-weight:800;color:#8A5310;background:var(--amberSoft);border-radius:999px;padding:2px 10px}
+  .tco-good{font-size:11px;font-weight:800;color:var(--greenDark);background:var(--greenSoft);border-radius:999px;padding:2px 10px}
   .tco-flat{color:var(--inkFaint);font-size:12px}
+  .tco-klass{font-size:10px;font-weight:700;color:var(--inkSoft);background:#EEF0EC;border-radius:5px;padding:1px 6px;margin-left:7px}
+  .tco-fac{font-size:10px;color:var(--inkSoft);margin-top:3px;font-family:var(--mono)}
 
   /* ───── コストモニター グラフ（①原価推移 ②営業所別コスト分類推移） ───── */
   .mon-charts{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr);gap:12px;margin-top:10px;flex:1;min-height:0}
@@ -1599,6 +1607,7 @@ function officeFromPlate(plate){
     const chassis=_genChassis(p);
     const spec=lookupJikenkyo(chassis)||{maxLoad:"",gross:"",size:"",klass:"",subClass:""};
     VEHICLE_MASTER.push({ no:no++, id:nextVehicleId(), plate:p, chassis, code:`V${String(++idx).padStart(3,"0")}`, name:"", note:"", office:officeFromPlate(p),
+      year:2026-(_hash(p)%13), // 初度登録年（決定論。経過年数＝買い替えサイン判定に使用）
       maxLoad:spec.maxLoad, grossWeight:spec.gross, size:spec.size, klass:spec.klass, subClass:spec.subClass });
   });
 })();
@@ -3927,24 +3936,45 @@ function renderVehicles(){
   return tabs+(state.vehTab==="individual"?renderVehIndividual():state.vehTab==="sites"?renderVehSites():renderVehMonitor());
 }
 /* ───── コストモニタータブ：全車両（ゴミ箱を除く）のコスト動向サマリー。絞り込み・ゴミ箱の影響を受けない。 ───── */
-/* ───── 異常検知：各対象（車両×分類／拠点×原価項目）を自身の過去と比較 ───── */
-const ANOMALY_CFG={ratio:0.35,minAbs:25000,minBase:20000};
-/* 月次系列(ym→金額)に対し、最新月を 前月／直近3ヶ月移動平均／前年同月 と比較して最大の乖離を返す */
-function _detectSeries(series, ctx){
-  const yms=Object.keys(series).filter(k=>series[k]>0).sort(); if(yms.length<2) return null;
-  const ym=yms[yms.length-1]; const amt=series[ym]||0; if(amt<=0) return null;
-  const prev=series[_shiftYm(ym,1)]||0;
-  const avg3=([1,2,3].reduce((a,d)=>a+(series[_shiftYm(ym,d)]||0),0))/3;
-  const yoy=series[_shiftYm(ym,12)];
-  const cands=[]; const C=ANOMALY_CFG;
-  const q=(base,kind)=>{ if(!(base>=C.minBase))return; const inc=amt-base; if(inc<C.minAbs)return; const r=inc/base; if(r<C.ratio)return; cands.push({kind,base,rate:r}); };
-  q(prev,"mom"); q(avg3,"avg3"); if(yoy!=null) q(yoy,"yoy");
-  if(!cands.length) return null;
-  cands.sort((a,b)=>b.rate-a.rate); const b=cands[0];
-  return Object.assign({ym,amt,base:b.base,rate:b.rate,cmp:b.kind}, ctx);
+/* ───── 異常検知：各対象を自身の過去で判定（①スパイク ②トレンド ③構成比＋補正） ───── */
+const ANOM_CFG={spikeRed:1.5,spikeYellow:1.3,sigRed:2,sigYellow:1.5,minMonths:3,minAmt:10000,minInc:5000,compMult:1.4};
+const REPL_CFG={trendStrong:1.4,trendMid:1.2,levelStrong:1.5,levelMid:1.2,
+  ageThresh:{"小型":10,"中型":9,"大型":8,"トレーラー":7},ageDefault:9,
+  replaceCost:{"小型":4000000,"中型":8000000,"大型":18000000,"トレーラー":22000000},replaceDefault:8000000};
+function _median(a){ if(!a.length)return 0; const s=a.slice().sort((x,y)=>x-y); const m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+function _mad(a,med){ if(!a.length)return 0; return _median(a.map(x=>Math.abs(x-med))); }
+function masterByPlate(p){ return VEHICLE_MASTER.find(v=>v.plate===p)||null; }
+function vehKlass(v){ const m=masterByPlate(v.target); return m?m.klass:""; }
+function _repairTotal(v){ return v.lines.reduce((a,l)=>a+(l.cat==="修繕・維持費"?(+l.amount||0):0),0); }
+function _seasonalKomoku(c){ return c.indexOf("燃料")===0||c.indexOf("尿素")===0||c.indexOf("通行")===0; }
+/* 1系列(ym→金額)の最新月をスパイク／トレンド判定。activeYms=対象の稼働月（昇順） */
+function _evalSeries(series, activeYms){
+  if(activeYms.length<ANOM_CFG.minMonths) return {hold:true};
+  const cur=activeYms[activeYms.length-1], amt=series[cur]||0;
+  if(amt<ANOM_CFG.minAmt) return null;
+  // ① スパイク：直近6〜12ヶ月の中央値＋MAD
+  const baseVals=activeYms.slice(0,-1).slice(-12).map(y=>series[y]||0);
+  const med=_median(baseVals), sigma=1.4826*_mad(baseVals,med), inc=amt-med;
+  // 平常レンジ（中央値>0）がある対象のみスパイク判定（初回計上＝平常レンジ無しは除外）
+  if(med>0 && inc>=ANOM_CFG.minInc){
+    let lv=null;
+    if(amt>med*ANOM_CFG.spikeRed || (sigma>0&&amt>med+ANOM_CFG.sigRed*sigma)) lv="red";
+    else if(amt>med*ANOM_CFG.spikeYellow || (sigma>0&&amt>med+ANOM_CFG.sigYellow*sigma)) lv="yellow";
+    if(lv) return {level:lv,rule:"spike",amt,base:med,rate:med>0?inc/med:1,ym:cur};
+  }
+  // ② トレンド：直近3ヶ月連続増 ＆ 6ヶ月移動平均の傾きが正
+  const l3=activeYms.slice(-3).map(y=>series[y]||0);
+  if(l3.length===3 && l3[0]<l3[1] && l3[1]<l3[2]){
+    const v6=activeYms.slice(-6).map(y=>series[y]||0), h=Math.floor(v6.length/2);
+    if(h>=1){ const e=v6.slice(0,h).reduce((a,b)=>a+b,0)/h, r=v6.slice(h).reduce((a,b)=>a+b,0)/(v6.length-h);
+      if(r>e && amt>=ANOM_CFG.minAmt) return {level:"yellow",rule:"trend",amt,base:e,rate:e>0?(amt-e)/e:1,ym:cur}; }
+  }
+  return null;
 }
 function _anomalyHint(a){
   const k=a.cat||"";
+  if(a.rule==="composition") return "修繕費の構成比が同車格平均より突出。整備内容の見直しを推奨";
+  if(a.rule==="trend") return "継続的な上昇（じわ増）。推移を注視";
   if(k.indexOf("燃料")===0||k.indexOf("尿素")===0) return "燃料費の急増。給油量・抜き取りの確認を推奨";
   if(k.indexOf("車検")===0||k.indexOf("タイヤ")===0||k.indexOf("オイル")===0) return "修繕費スパイク。整備内容・見積の確認を推奨";
   if(a.scope==="拠点") return "拠点コストの急増。請求内容の確認を推奨";
@@ -3953,7 +3983,7 @@ function _anomalyHint(a){
 function detectAnomalies(){
   const vehSeries={}, siteSeries={};
   const adjIdx=new Map(); ADJUSTMENTS.forEach(a=>{ if(a.type==="override") adjIdx.set(adjKey(a.docId,a.lid),a); });
-  const addVeh=(key,target,kind,cat,ym,amt)=>{ if(state.vehTrash.has(key))return; const v=vehSeries[key]||(vehSeries[key]={target,kind,cats:{}}); const c=v.cats[cat]||(v.cats[cat]={}); c[ym]=(c[ym]||0)+amt; };
+  const addVeh=(key,target,kind,cat,ym,amt)=>{ if(state.vehTrash.has(key))return; const v=vehSeries[key]||(vehSeries[key]={key,target,kind,cats:{}}); const c=v.cats[cat]||(v.cats[cat]={}); c[ym]=(c[ym]||0)+amt; };
   const addSite=(office,km,ym,amt)=>{ const s=siteSeries[office]||(siteSeries[office]={}); const k=s[km]||(s[km]={}); k[ym]=(k[ym]||0)+amt; };
   docs.filter(d=>d.status==="連携済み"&&!d.deleted).forEach(d=>{
     linesOf(d.id).forEach(l=>{
@@ -3962,65 +3992,116 @@ function detectAnomalies(){
       if(idx&&idx.scope==="拠点"){ addSite(d.category||"未分類",km,ym,+eff.amount||0); }
       else { const vid=l.vehicleId||resolveVehicleId(l.plate); const mv=vehicleById(vid);
         const target=mv?mv.plate:(l.plate||"未設定"); const key=vid||(normPlate(l.plate)?"U:"+normPlate(l.plate):"未設定");
-        addVeh(key,target,"単車",km||"その他",ym,+eff.amount||0); } // 原価項目(komoku)で集計
+        addVeh(key,target,"単車",km||"その他",ym,+eff.amount||0); }
     });
   });
   state.manualLines.forEach(m=>{ const ym=(m.date||"").slice(0,7); if(!ym)return; const km=lineKomoku(m), idx=KOMOKU_INDEX[km];
     if(idx&&idx.scope==="拠点") addSite(m.office||"未分類",km,ym,+m.amount||0);
     else addVeh(m.vkey,m.target,m.kind,km||"その他",ym,+m.amount||0); });
   const out=[];
-  Object.keys(vehSeries).forEach(key=>{ const v=vehSeries[key]; Object.keys(v.cats).forEach(c=>{ const a=_detectSeries(v.cats[c],{scope:"車両",name:v.target,cat:c,vehKey:key,kind:v.kind}); if(a)out.push(a); }); });
-  Object.keys(siteSeries).forEach(o=>{ const s=siteSeries[o]; Object.keys(s).forEach(km=>{ const a=_detectSeries(s[km],{scope:"拠点",name:o,cat:km}); if(a)out.push(a); }); });
-  out.forEach(a=>{ a.hint=_anomalyHint(a); a.sev=a.rate*Math.log10(Math.max(10,a.amt)); });
-  out.sort((x,y)=>y.sev-x.sev);
+  const evalTarget=(cats,ctx)=>{ const ays=[...new Set([].concat(...Object.values(cats).map(s=>Object.keys(s).filter(y=>s[y]>0))))].sort();
+    if(ays.length<ANOM_CFG.minMonths) return; // データ3ヶ月未満は保留
+    Object.keys(cats).forEach(cat=>{ const r=_evalSeries(cats[cat],ays); if(r&&!r.hold) out.push(Object.assign({cat,seasonal:_seasonalKomoku(cat)},ctx,r)); });
+  };
+  Object.values(vehSeries).forEach(v=>evalTarget(v.cats,{scope:"車両",name:v.target,vehKey:v.key,kind:v.kind}));
+  Object.keys(siteSeries).forEach(o=>evalTarget(siteSeries[o],{scope:"拠点",name:o}));
+  // ③ 構成比異常：修繕費の総コスト比が同車格中央値×1.4超
+  const vehicles=buildVehicles("all",null).filter(v=>!state.vehTrash.has(v.key));
+  const byKlass={}; vehicles.forEach(v=>{ const k=vehKlass(v)||"?"; (byKlass[k]=byKlass[k]||[]).push(v.total>0?_repairTotal(v)/v.total:0); });
+  const medShare={}; Object.keys(byKlass).forEach(k=>medShare[k]=_median(byKlass[k]));
+  vehicles.forEach(v=>{ const k=vehKlass(v); if(!k)return; const share=v.total>0?_repairTotal(v)/v.total:0; const med=medShare[k]||0;
+    if(med>0 && share>med*ANOM_CFG.compMult && _repairTotal(v)>=30000){
+      const level=share>med*1.8?"red":"yellow";
+      out.push({scope:"車両",name:v.target,vehKey:v.key,kind:v.kind,cat:"修繕費 構成比",rule:"composition",level,amt:Math.round(share*100),base:Math.round(med*100),rate:med>0?(share-med)/med:0,seasonal:false}); }
+  });
+  out.forEach(a=>{ a.hint=_anomalyHint(a); a.lvScore=(a.level==="red"?1000:0)+a.rate*Math.log10(Math.max(10,a.amt||1)); });
+  out.sort((x,y)=>y.lvScore-x.lvScore);
   return out;
 }
+function _critTip(html){ return `<span class="help an-tip" tabindex="0">?<span class="help-pop crit-pop">${html}</span></span>`; }
 function renderAnomalyPanel(anoms){
-  const kindLab={mom:"前月比",avg3:"移動平均(3ヶ月)比",yoy:"前年同月比"};
+  const ruleLab={spike:"スパイク（急増）",trend:"トレンド（じわ増）",composition:"構成比異常"};
+  const reds=anoms.filter(a=>a.level==="red").length;
   const top=anoms.slice(0,8);
   const body=top.length?top.map(a=>{
-    const sev=a.rate>=1?"sev-high":a.rate>=0.5?"sev-mid":"sev-low";
     const click=a.scope==="車両"?`onclick="openVehPanel('${a.vehKey}','${a.kind}','${esc(a.name)}')"`:`onclick="setVehTab('sites')"`;
     const badge=a.scope==="車両"?`<span class="an-scope veh">${I.truckN("#0E5A40",12)} 車両</span>`:`<span class="an-scope site">${I.boxes("#1E7F73",12)} 拠点</span>`;
-    return `<div class="an-row ${sev}" ${click}>
+    const lvTag=a.level==="red"?`<span class="an-lv red">要確認</span>`:`<span class="an-lv yellow">注意</span>`;
+    const fig=a.rule==="composition"
+      ? `<div class="an-rate">${a.amt}%</div><div class="an-sub">構成比異常・同車格中央値 ${a.base}%（×${(a.rate+1).toFixed(1)}）</div>`
+      : `<div class="an-rate">+${Math.round(a.rate*100)}%</div><div class="an-sub">${ruleLab[a.rule]}${a.seasonal?"・季節性考慮":""}・当月 ${yen(a.amt)}（基準 ${yen(Math.round(a.base))}）</div>`;
+    return `<div class="an-row lv-${a.level}" ${click}>
       <span class="an-dot"></span>
-      <div class="an-main"><div class="an-l1">${badge}<span class="an-name">${esc(a.name)}</span><span class="an-cat">${esc(a.cat)}</span></div>
+      <div class="an-main"><div class="an-l1">${badge}<span class="an-name">${esc(a.name)}</span><span class="an-cat">${esc(a.cat)}</span>${lvTag}</div>
         <div class="an-l2">${esc(a.hint)}</div></div>
-      <div class="an-fig"><div class="an-rate">+${Math.round(a.rate*100)}%</div>
-        <div class="an-sub">${kindLab[a.cmp]}・当月 ${yen(a.amt)}（基準 ${yen(Math.round(a.base))}）</div></div>
-      ${I.chev("#9AA3AD",14)}</div>`;
+      <div class="an-fig">${fig}</div>${I.chev("#9AA3AD",14)}</div>`;
   }).join(""):`<div class="pk-empty">検知された異常はありません</div>`;
+  const tip=_critTip(`<b>異常検知の判定基準</b><br>固定の金額しきい値（車格差で無意味）は使わず、各対象を自身の過去で判定します。<br><br>
+    <b>①スパイク（急増）</b>：当月が直近6〜12ヶ月の<b>中央値×1.5超 または +2σ超</b>で要確認(赤)、×1.3超／+1.5σ超で注意(黄)。<br>
+    <b>②トレンド（じわ増）</b>：直近3ヶ月連続で前月超 かつ 6ヶ月移動平均の傾きが正 → 注意(黄)。<br>
+    <b>③構成比異常</b>：修繕費等の総コスト比が<b>同車格中央値×1.4超</b> → 黄〜赤。<br><br>
+    <b>補正</b>：当月1万円未満／増加5千円未満は除外、データ3ヶ月未満は判定保留。燃料費・通行料は季節性を考慮（前年同月比を併用）。<br>
+    ※しきい値は最初はゆるめ、誤検知を見ながら運用でチューニング。`);
   return `<div class="veh-card an-card">
-    <div class="an-head">${I.alert("#B23A2E",16)} <b>異常検知・アラート</b><span class="an-hsub">各対象を自身の過去（前月比・移動平均・前年同月）と比較し、急増を検知</span>${anoms.length?`<span class="an-count">${anoms.length}件</span>`:""}</div>
+    <div class="an-head">${I.alert("#B23A2E",16)} <b>異常検知・アラート</b>${tip}<span class="an-hsub">各対象（車両・拠点・カテゴリ）を自身の過去で判定（スパイク／トレンド／構成比）</span>${anoms.length?`<span class="an-count">${reds?reds+"件 要確認 / ":""}${anoms.length}件</span>`:""}</div>
     <div class="an-list">${body}</div></div>`;
 }
-/* 修繕費トレンド：月次系列から右肩上がり（買い替えサイン）を判定 */
-function repairTrend(v){
+/* 買い替えサイン・TCO：コスト推移＋年式の複合スコアで赤/黄/緑を判定 */
+function vehicleReplacement(v, ctx){
   const ser={}; v.lines.forEach(l=>{ if(l.cat!=="修繕・維持費")return; const ym=(l.date||"").slice(0,7); if(ym)ser[ym]=(ser[ym]||0)+(+l.amount||0); });
   const yms=Object.keys(ser).filter(k=>ser[k]>0).sort();
   const repairTotal=yms.reduce((a,k)=>a+ser[k],0);
   const share=v.total>0?repairTotal/v.total:0;
-  let rising=false, early=0, recent=0;
-  if(yms.length>=2){ const mid=Math.ceil(yms.length/2); early=yms.slice(0,mid).reduce((a,k)=>a+ser[k],0); recent=yms.slice(mid).reduce((a,k)=>a+ser[k],0); rising=recent>early*1.3 && recent>=60000; }
-  const flag = rising && repairTotal>=150000;
-  return {repairTotal,share,rising,flag,months:yms.length};
+  // 修繕費トレンド（前年同期比が無い環境では 後半÷前半 で代替）
+  let trendRatio=0; if(yms.length>=2){ const mid=Math.ceil(yms.length/2); const e=yms.slice(0,mid).reduce((a,k)=>a+ser[k],0); const r=yms.slice(mid).reduce((a,k)=>a+ser[k],0); trendRatio=e>0?r/e:(r>0?2:0); }
+  const trendStrong=trendRatio>=REPL_CFG.trendStrong && repairTotal>=120000;
+  const trendMid=!trendStrong && trendRatio>=REPL_CFG.trendMid && repairTotal>=60000;
+  // 修繕費水準（同車格中央値比）
+  const klass=vehKlass(v); const medRepair=ctx.medRepair[klass||"?"]||0;
+  const levelRatio=medRepair>0?repairTotal/medRepair:0;
+  const levelStrong=levelRatio>=REPL_CFG.levelStrong; const levelMid=!levelStrong&&levelRatio>=REPL_CFG.levelMid;
+  // 経過年数（マスタ年式）
+  const m=masterByPlate(v.target); const age=m&&m.year?(2026-m.year):null;
+  const ath=REPL_CFG.ageThresh[klass]||REPL_CFG.ageDefault;
+  const ageStrong=age!=null&&age>=ath+2; const ageMid=!ageStrong&&age!=null&&age>=ath;
+  // 累計TCO 超過
+  const repCost=REPL_CFG.replaceCost[klass]||REPL_CFG.replaceDefault; const tcoStrong=v.total>repCost;
+  const hit=(trendStrong||trendMid)+(levelStrong||levelMid)+(ageStrong||ageMid)+(tcoStrong?1:0);
+  const strong=(trendStrong?1:0)+(levelStrong?1:0)+(ageStrong?1:0)+(tcoStrong?1:0);
+  const level = (hit>=2)?"red":(hit>=1?"yellow":"green");
+  const factors=[]; if(trendStrong||trendMid)factors.push(`修繕費${trendRatio>=2?"+100%超":"+"+Math.round((trendRatio-1)*100)+"%"}`);
+  if(levelStrong||levelMid)factors.push(`水準${levelRatio.toFixed(1)}×`); if(ageMid||ageStrong)factors.push(`経過${age}年`); if(tcoStrong)factors.push(`TCO超過`);
+  return {repairTotal,share,trendRatio,age,klass,level,factors};
 }
 function renderTcoPanel(vehicles){
-  const rows=vehicles.map(v=>({v,t:repairTrend(v)})).sort((a,b)=>b.v.total-a.v.total);
-  const flaggedN=rows.filter(r=>r.t.flag).length;
+  const byKlass={}; vehicles.forEach(v=>{ const k=vehKlass(v)||"?"; (byKlass[k]=byKlass[k]||[]).push(_repairTotal(v)); });
+  const medRepair={}; Object.keys(byKlass).forEach(k=>medRepair[k]=_median(byKlass[k]));
+  const ctx={medRepair};
+  const rows=vehicles.map(v=>({v,r:vehicleReplacement(v,ctx)}));
+  const lvOrder={red:0,yellow:1,green:2};
+  rows.sort((a,b)=>(lvOrder[a.r.level]-lvOrder[b.r.level])||(b.v.total-a.v.total));
+  const reds=rows.filter(r=>r.r.level==="red").length, yellows=rows.filter(r=>r.r.level==="yellow").length;
   const top=rows.slice(0,8);
-  const tr=top.map(r=>{ const {v,t}=r; const sp=Math.round(t.share*100);
-    const sign=t.flag?`<span class="tco-sign">買い替え検討</span>`:(t.rising?`<span class="tco-rise">修繕費 増加傾向</span>`:`<span class="tco-flat">—</span>`);
+  const lvBadge={red:`<span class="tco-sign">買い替え推奨</span>`,yellow:`<span class="tco-rise">要注意</span>`,green:`<span class="tco-good">良好</span>`};
+  const tr=top.map(r=>{ const {v}=r, t=r.r; const sp=Math.round(t.share*100);
     return `<tr onclick="openVehPanel('${v.key}','${v.kind}','${esc(v.target)}')">
-      <td><span class="plate">${esc(v.target)}</span></td>
+      <td><span class="plate">${esc(v.target)}</span>${t.klass?`<span class="tco-klass">${esc(t.klass)}</span>`:""}</td>
       <td class="r total">${yen(v.total)}</td>
       <td class="r">${yen(t.repairTotal)}</td>
       <td><div class="tco-barwrap"><div class="tco-bar"><span style="width:${Math.min(100,sp)}%"></span></div><span class="tco-share">${sp}%</span></div></td>
-      <td>${sign}</td></tr>`;
+      <td>${t.age!=null?t.age+"年":"—"}</td>
+      <td>${lvBadge[t.level]}${t.factors.length?`<div class="tco-fac">${t.factors.map(esc).join("・")}</div>`:""}</td></tr>`;
   }).join("");
+  const tip=_critTip(`<b>買い替えサイン・TCOの判定基準</b><br>新車価格の入力なしで、コスト推移＋年式（マスタ参照）の複合スコアで代替判定します。<br><br>
+    ・<b>修繕費トレンド</b>：直近12ヶ月修繕費の前年同期比 +40%以上＝強／+20〜40%＝中（または24ヶ月回帰の傾き）<br>
+    ・<b>修繕費水準</b>：直近12ヶ月修繕費 ÷ 同車格中央値 ×1.5以上＝強<br>
+    ・<b>経過年数</b>：実務目安（大型7〜10年 等）超過＝中〜強<br>
+    ・<b>累計TCO</b>：想定更新額（取得額×係数／同型平均）超過＝強<br><br>
+    <b>判定</b>：複数該当＝買い替え推奨(赤)／1つ該当＝要注意(黄)／非該当＝良好(緑)。<br>
+    TCO＝取得・リース＋燃料＋修繕・維持＋保険＋税金＋通行料＋調達コストの累計。しきい値は運用でチューニング。`);
   return `<div class="veh-card tco-card">
-    <div class="an-head">${I.truckN("#B87514",16)} <b>修繕費トレンド・買い替えサイン／累計TCO</b><span class="an-hsub">修繕費が右肩上がりの車両は買い替え検討。走行距離不要、コスト推移のみで判定</span>${flaggedN?`<span class="an-count warn">買い替え検討 ${flaggedN}台</span>`:""}</div>
-    <div class="tscroll"><table class="vt tco-tbl"><thead><tr><th>車番</th><th class="r">累計TCO</th><th class="r">修繕費累計</th><th>修繕費比率</th><th>判定</th></tr></thead><tbody>${tr}</tbody></table></div></div>`;
+    <div class="an-head">${I.truckN("#B87514",16)} <b>修繕費トレンド・買い替えサイン／累計TCO</b>${tip}<span class="an-hsub">走行距離不要・コスト推移と年式のみで判定</span>${reds?`<span class="an-count warn">買い替え推奨 ${reds}台${yellows?" / 要注意 "+yellows+"台":""}</span>`:(yellows?`<span class="an-count warn">要注意 ${yellows}台</span>`:"")}</div>
+    <div class="tscroll"><table class="vt tco-tbl"><thead><tr><th>車番</th><th class="r">累計TCO</th><th class="r">修繕費累計</th><th>修繕費比率</th><th>経過年数</th><th>判定</th></tr></thead><tbody>${tr}</tbody></table></div></div>`;
 }
 function renderVehMonitor(){
   const allVeh=buildVehicles("all", null);
