@@ -737,7 +737,11 @@
   .an-lv{font-size:10px;font-weight:800;border-radius:5px;padding:1px 6px}
   .an-lv.red{color:#B23A2E;background:var(--alertSoft)}
   .an-lv.yellow{color:#8A5310;background:var(--amberSoft)}
-  .crit-pop{width:360px;max-width:78vw;line-height:1.7;text-align:left;font-weight:600}
+  .crit-pop{width:300px;max-width:80vw;font-size:11px;line-height:1.5;text-align:left;font-weight:600;padding:11px 12px}
+  .crit-pop b{font-size:11.5px}
+  .crit-pop .ct-h{display:block;font-size:12px;margin-bottom:5px}
+  .crit-pop .ct-r{display:block;margin-bottom:3px}
+  .crit-pop .ct-n{display:block;margin-top:5px;color:var(--inkSoft);font-weight:500}
   .an-tip{margin-left:2px}
   .an-tip.tip-right .crit-pop{left:auto;right:0}
   .an-main{flex:1;min-width:0}
@@ -4038,12 +4042,11 @@ function renderAnomalyPanel(anoms){
         <div class="an-l2">${esc(a.hint)}</div></div>
       <div class="an-fig">${fig}</div>${I.chev("#9AA3AD",14)}</div>`;
   }).join(""):`<div class="pk-empty">検知された異常はありません</div>`;
-  const tip=_critTip(`<b>異常検知の判定基準</b><br>固定の金額しきい値（車格差で無意味）は使わず、各対象を自身の過去で判定します。<br><br>
-    <b>①スパイク（急増）</b>：当月が直近6〜12ヶ月の<b>中央値×1.5超 または +2σ超</b>で要確認(赤)、×1.3超／+1.5σ超で注意(黄)。<br>
-    <b>②トレンド（じわ増）</b>：直近3ヶ月連続で前月超 かつ 6ヶ月移動平均の傾きが正 → 注意(黄)。<br>
-    <b>③構成比異常</b>：修繕費等の総コスト比が<b>同車格中央値×1.4超</b> → 黄〜赤。<br><br>
-    <b>補正</b>：当月1万円未満／増加5千円未満は除外、データ3ヶ月未満は判定保留。燃料費・通行料は季節性を考慮（前年同月比を併用）。<br>
-    ※しきい値は最初はゆるめ、誤検知を見ながら運用でチューニング。`);
+  const tip=_critTip(`<b class="ct-h">異常検知の判定基準</b>
+    <span class="ct-r"><b>①スパイク</b>：中央値×1.5／+2σ超＝赤、×1.3／+1.5σ超＝黄</span>
+    <span class="ct-r"><b>②トレンド</b>：3ヶ月連続増＋6ヶ月平均が上向き＝黄</span>
+    <span class="ct-r"><b>③構成比</b>：修繕費比率が同車格中央値×1.4超＝黄〜赤</span>
+    <span class="ct-n">各対象を自身の過去と比較。少額（当月1万/増5千円未満）除外・3ヶ月未満は保留・燃料/通行料は季節性考慮。</span>`);
   return `<div class="veh-card an-card">
     <div class="an-head">${I.alert("#B23A2E",16)} <b>異常検知・アラート</b>${tip}<span class="an-hsub">各対象（車両・拠点・カテゴリ）を自身の過去で判定（スパイク／トレンド／構成比）</span>${anoms.length?`<span class="an-count">${reds?reds+"件 要確認 / ":""}${anoms.length}件</span>`:""}</div>
     <div class="an-list">${body}</div></div>`;
@@ -4093,13 +4096,13 @@ function renderTcoPanel(vehicles){
       <td>${t.age!=null?t.age+"年":"—"}</td>
       <td>${lvBadge[t.level]}${t.factors.length?`<div class="tco-fac">${t.factors.map(esc).join("・")}</div>`:""}</td></tr>`;
   }).join("");
-  const tip=_critTip(`<b>買い替えサイン・TCOの判定基準</b><br>新車価格の入力なしで、コスト推移＋年式（マスタ参照）の複合スコアで代替判定します。<br><br>
-    ・<b>修繕費トレンド</b>：直近12ヶ月修繕費の前年同期比 +40%以上＝強／+20〜40%＝中（または24ヶ月回帰の傾き）<br>
-    ・<b>修繕費水準</b>：直近12ヶ月修繕費 ÷ 同車格中央値 ×1.5以上＝強<br>
-    ・<b>経過年数</b>：実務目安（大型7〜10年 等）超過＝中〜強<br>
-    ・<b>累計TCO</b>：想定更新額（取得額×係数／同型平均）超過＝強<br><br>
-    <b>判定</b>：複数該当＝買い替え推奨(赤)／1つ該当＝要注意(黄)／非該当＝良好(緑)。<br>
-    TCO＝取得・リース＋燃料＋修繕・維持＋保険＋税金＋通行料＋調達コストの累計。しきい値は運用でチューニング。`,"right");
+  const tip=_critTip(`<b class="ct-h">買い替えサイン・TCOの判定基準</b>
+    <span class="ct-r">・<b>修繕費トレンド</b>：前年同期比 +40%＝強／+20%＝中</span>
+    <span class="ct-r">・<b>修繕費水準</b>：同車格中央値×1.5以上＝強</span>
+    <span class="ct-r">・<b>経過年数</b>：目安（大型7〜10年 等）超過＝中〜強</span>
+    <span class="ct-r">・<b>累計TCO</b>：想定更新額 超過＝強</span>
+    <span class="ct-r"><b>判定</b>：複数該当＝赤／1つ＝黄／非該当＝緑</span>
+    <span class="ct-n">新車価格不要。コスト推移＋年式で判定。TCO＝取得・燃料・修繕・保険・税金・通行料 等の累計。</span>`,"right");
   return `<div class="veh-card tco-card">
     <div class="an-head">${I.truckN("#B87514",16)} <b>修繕費トレンド・買い替えサイン／累計TCO</b>${tip}<span class="an-hsub">走行距離不要・コスト推移と年式のみで判定</span>${reds?`<span class="an-count warn">買い替え推奨 ${reds}台${yellows?" / 要注意 "+yellows+"台":""}</span>`:(yellows?`<span class="an-count warn">要注意 ${yellows}台</span>`:"")}</div>
     <div class="tscroll tco-scroll"><table class="vt tco-tbl"><thead><tr><th>車番</th><th class="r">累計TCO</th><th class="r">修繕費累計</th><th>修繕費比率</th><th>経過年数</th><th>判定</th></tr></thead><tbody>${tr}</tbody></table></div></div>`;
