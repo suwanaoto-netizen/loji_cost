@@ -725,7 +725,9 @@
   .an-hsub{font-size:11.5px;color:var(--inkSoft);font-weight:600}
   .an-count{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight:800;color:#B23A2E;background:var(--alertSoft);border-radius:999px;padding:2px 10px}
   .an-count.warn{color:#8A5310;background:var(--amberSoft)}
-  .an-list{padding:4px 8px 8px}
+  .an-list{padding:4px 8px 8px;max-height:312px;overflow-y:auto}
+  .tco-scroll{max-height:320px;overflow:auto}
+  .tco-scroll .tco-tbl thead th{position:sticky;top:0;z-index:2;background:#F3F5F2}
   .an-row{display:flex;align-items:center;gap:11px;padding:10px 10px;border-radius:9px;cursor:pointer;border-left:3px solid transparent}
   .an-row:hover{background:#F6FBF8}
   .an-row .an-dot{width:9px;height:9px;border-radius:50%;flex:none;background:#B23A2E}
@@ -4022,8 +4024,7 @@ function _critTip(html){ return `<span class="help an-tip" tabindex="0">?<span c
 function renderAnomalyPanel(anoms){
   const ruleLab={spike:"スパイク（急増）",trend:"トレンド（じわ増）",composition:"構成比異常"};
   const reds=anoms.filter(a=>a.level==="red").length;
-  const top=anoms.slice(0,8);
-  const body=top.length?top.map(a=>{
+  const body=anoms.length?anoms.map(a=>{
     const click=a.scope==="車両"?`onclick="openVehPanel('${a.vehKey}','${a.kind}','${esc(a.name)}')"`:`onclick="setVehTab('sites')"`;
     const badge=a.scope==="車両"?`<span class="an-scope veh">${I.truckN("#0E5A40",12)} 車両</span>`:`<span class="an-scope site">${I.boxes("#1E7F73",12)} 拠点</span>`;
     const lvTag=a.level==="red"?`<span class="an-lv red">要確認</span>`:`<span class="an-lv yellow">注意</span>`;
@@ -4081,9 +4082,8 @@ function renderTcoPanel(vehicles){
   const lvOrder={red:0,yellow:1,green:2};
   rows.sort((a,b)=>(lvOrder[a.r.level]-lvOrder[b.r.level])||(b.v.total-a.v.total));
   const reds=rows.filter(r=>r.r.level==="red").length, yellows=rows.filter(r=>r.r.level==="yellow").length;
-  const top=rows.slice(0,8);
   const lvBadge={red:`<span class="tco-sign">買い替え推奨</span>`,yellow:`<span class="tco-rise">要注意</span>`,green:`<span class="tco-good">良好</span>`};
-  const tr=top.map(r=>{ const {v}=r, t=r.r; const sp=Math.round(t.share*100);
+  const tr=rows.map(r=>{ const {v}=r, t=r.r; const sp=Math.round(t.share*100);
     return `<tr onclick="openVehPanel('${v.key}','${v.kind}','${esc(v.target)}')">
       <td><span class="plate">${esc(v.target)}</span>${t.klass?`<span class="tco-klass">${esc(t.klass)}</span>`:""}</td>
       <td class="r total">${yen(v.total)}</td>
@@ -4101,7 +4101,7 @@ function renderTcoPanel(vehicles){
     TCO＝取得・リース＋燃料＋修繕・維持＋保険＋税金＋通行料＋調達コストの累計。しきい値は運用でチューニング。`);
   return `<div class="veh-card tco-card">
     <div class="an-head">${I.truckN("#B87514",16)} <b>修繕費トレンド・買い替えサイン／累計TCO</b>${tip}<span class="an-hsub">走行距離不要・コスト推移と年式のみで判定</span>${reds?`<span class="an-count warn">買い替え推奨 ${reds}台${yellows?" / 要注意 "+yellows+"台":""}</span>`:(yellows?`<span class="an-count warn">要注意 ${yellows}台</span>`:"")}</div>
-    <div class="tscroll"><table class="vt tco-tbl"><thead><tr><th>車番</th><th class="r">累計TCO</th><th class="r">修繕費累計</th><th>修繕費比率</th><th>経過年数</th><th>判定</th></tr></thead><tbody>${tr}</tbody></table></div></div>`;
+    <div class="tscroll tco-scroll"><table class="vt tco-tbl"><thead><tr><th>車番</th><th class="r">累計TCO</th><th class="r">修繕費累計</th><th>修繕費比率</th><th>経過年数</th><th>判定</th></tr></thead><tbody>${tr}</tbody></table></div></div>`;
 }
 function renderVehMonitor(){
   const allVeh=buildVehicles("all", null);
