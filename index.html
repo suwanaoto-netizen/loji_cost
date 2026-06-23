@@ -4525,14 +4525,14 @@ function _invFilteredItems(){ return INV_ITEMS.filter(it=>(state.invCat==="all"|
 function _invFilteredCats(){ return INV_CATS.filter(c=>state.invCat==="all"||c.k===state.invCat); }
 function invCatPill(k){ const c=INV_CAT[k]; return `<span class="catpill" style="color:${c.color};background:${c.bg}">${esc(c.l)}</span>`; }
 function renderInventory(){
-  const head=`<div class="pagehead pagehead-veh"><div><p>仕入→在庫→出庫（消費・装着・貸出）→棚卸 の在庫サイクルを管理します。在庫は<b>拠点</b>で保有し、出庫時に<b>車両／案件</b>へ配賦。<b>出庫＝原価計上</b>として「拠点コスト」「車両コスト」に連携されます。</p></div></div>`;
-  const tab=state.invTab||"stock";
-  const segs=[["stock","在庫照会"],["moves","入出庫履歴"],["stocktake","棚卸"],["master","品目マスタ"]];
+  const head=`<div class="pagehead pagehead-veh"><div><p>仕入→在庫→出庫（消費・装着・貸出）の在庫サイクルを管理します。在庫は<b>拠点</b>で保有し、出庫時に<b>車両／案件</b>へ配賦。<b>出庫＝原価計上</b>として「拠点コスト」「車両コスト」に連携されます。</p></div></div>`;
+  const tab=(state.invTab==="moves")?"moves":"stock";
+  const segs=[["stock","在庫照会"],["moves","入出庫履歴"]];
   const seg=`<div class="inv-bar"><div class="seg">${segs.map(([k,l])=>`<button class="${tab===k?"on":""}" onclick="setInvTab('${k}')">${esc(l)}</button>`).join("")}</div>
     <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 品目区分</span><select onchange="setInvCat(this.value)"><option value="all" ${state.invCat==="all"?"selected":""}>すべて</option>${INV_CATS.map(c=>`<option value="${c.k}" ${state.invCat===c.k?"selected":""}>${esc(c.l)}</option>`).join("")}</select></div>
     <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 保管拠点</span><select onchange="setInvOffice(this.value)"><option value="all" ${state.invOffice==="all"?"selected":""}>全拠点</option>${CATEGORIES.map(o=>`<option value="${esc(o)}" ${state.invOffice===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>
   </div>`;
-  const body=tab==="moves"?invMovesView():tab==="stocktake"?invStocktakeView():tab==="master"?invMasterView():invStockView();
+  const body=tab==="moves"?invMovesView():invStockView();
   return head+seg+body;
 }
 function invFlowNote(){
@@ -4630,24 +4630,6 @@ function invMovesView(){
   }).join("");
   return invFlowNote()+`<div class="inv-card"><h3>${I.docs("#177D58",16)} 入出庫履歴 <span class="sub" style="margin-left:4px">直近60件</span></h3><p class="sub">請求書・納品書からの自動取込、給油機・デジタコ連携、バーコード/QRでの入出庫を想定。出庫はそのまま原価計上に連携。</p>
     <div class="tscroll"><table class="invt"><thead><tr><th>日付</th><th>区分</th><th>入出庫</th><th>品目</th><th>拠点</th><th class="r">数量</th><th class="r">単価</th><th class="r">金額</th><th>仕入先／配賦先</th><th>原価連携</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
-}
-function invStocktakeView(){
-  const items=_invFilteredItems();
-  let totLoss=0;
-  const rows=items.map(it=>{ const s=invStock(it.id); const shrink=it.shrink||0; const actual=s.qty-shrink; const lossAmt=Math.round(shrink*s.avg); totLoss+=lossAmt;
-    return `<tr class="${shrink>0?"lowrow":""}"><td><b>${esc(it.name)}</b> <span style="color:var(--inkSoft);font-size:11px">${esc(it.spec)}</span></td><td>${invCatPill(it.cat)}</td><td>${esc(it.office)}</td><td class="r">${s.qty.toLocaleString("ja-JP")} ${esc(it.unit)}</td><td class="r">${actual.toLocaleString("ja-JP")} ${esc(it.unit)}</td><td class="r">${shrink>0?`<span style="color:var(--alert);font-weight:800">−${shrink} ${esc(it.unit)}</span>`:"±0"}</td><td class="r">${shrink>0?`<span style="color:var(--alert)">−${yen(lossAmt)}</span>`:"—"}</td><td>${shrink>0?`<span class="inv-badge pill-low">差異あり</span>`:`<span class="inv-badge pill-ok">一致</span>`}</td></tr>`;
-  }).join("");
-  return `<div class="inv-card"><h3>${I.checkc?I.checkc("#177D58",16):I.check("#177D58",16)} 棚卸（理論在庫 × 実地在庫）</h3><p class="sub">理論在庫と実地在庫を突合し、差異＝ロスを記録。燃料ロス・カゴ車紛失・消耗品の差異を可視化します。棚卸ロス合計：<b style="color:var(--alert)">−${yen(totLoss)}</b></p>
-    <div class="tscroll"><table class="invt"><thead><tr><th>品目・規格</th><th>区分</th><th>保管拠点</th><th class="r">理論在庫</th><th class="r">実地在庫</th><th class="r">差異</th><th class="r">ロス金額</th><th>状態</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
-}
-function invMasterView(){
-  const items=_invFilteredItems();
-  const rows=items.map(it=>{ const c=INV_CAT[it.cat];
-    const extra=it.cat==="tire"?`${esc(it.size)} / ${esc(it.fit)}`:(it.expiry?`使用期限 ${esc(it.expiry)}`:it.inspect?`点検 ${esc(it.inspect)}`:it.cap?`容量 ${it.cap.toLocaleString("ja-JP")}${esc(it.unit)}`:"—");
-    return `<tr><td><b>${esc(it.name)}</b></td><td>${esc(it.spec)}</td><td>${invCatPill(it.cat)}</td><td>${esc(it.unit)}</td><td class="r">¥${Math.round(it.price).toLocaleString("ja-JP")}</td><td>${esc(it.supplier)}</td><td>${esc(it.office)}</td><td class="r">${it.reorder.toLocaleString("ja-JP")}</td><td style="font-size:11px;color:var(--inkSoft)">${extra}</td><td style="font-size:11px">${esc(it.costItem)}</td></tr>`;
-  }).join("");
-  return `<div class="inv-card"><h3>${I.db("#177D58",16)} 品目マスタ</h3><p class="sub">品名・規格・単位・標準単価・発注先・保管拠点・発注点を管理。タイヤはサイズ／適合車両、法定備品は期限。各品目は原価項目（komoku）の内訳に連動します。</p>
-    <div class="tscroll"><table class="invt"><thead><tr><th>品名</th><th>規格</th><th>区分</th><th>単位</th><th class="r">標準単価</th><th>発注先</th><th>保管拠点</th><th class="r">発注点</th><th>固有情報</th><th>原価項目内訳</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 /* ───── 車両のゴミ箱（確認ステップ＋変更履歴） ───── */
 function toggleVehTrash(){ state.vehTrashView=!state.vehTrashView; state.vehPage=1; render(); }
