@@ -719,7 +719,7 @@
   .pk-detail{flex-shrink:0;display:inline-flex;align-items:center;gap:1px;font-size:10.5px;font-weight:700;color:var(--greenDark);white-space:nowrap}
   .pk-empty{font-size:11px;color:var(--inkFaint);font-weight:700;padding:6px 4px}
   /* ───── 異常検知・アラート／TCOパネル（コストモニター最上部） ───── */
-  .an-card,.tco-card{display:block;overflow:visible;margin-bottom:14px}
+  .an-card,.tco-card{display:block;overflow:hidden;margin-bottom:14px}
   .an-head{display:flex;align-items:center;gap:8px;padding:13px 16px;border-bottom:1px solid var(--lineSoft);font-size:14.5px}
   .an-head b{font-size:14.5px;color:var(--ink)}
   .an-hsub{font-size:11.5px;color:var(--inkSoft);font-weight:600}
@@ -4107,7 +4107,7 @@ function renderVehMonitor(){
   const allVeh=buildVehicles("all", null);
   const vehicles=allVeh.filter(v=>!state.vehTrash.has(v.key));
   const head=`<div class="pagehead pagehead-veh">
-    <div><p>連携済みの書類から、登録車両全体のコスト動向を集計します。前月比やデータ収集状況を一目で把握できます。<span style="color:#d32f2f">※給与・運賃・間接費は含まれていません</span></p></div>
+    <div><p>連携済みの書類から、登録車両全体のコスト動向を集計します。前月比やデータ収集状況を一目で把握できます。</p></div>
   </div>`;
   if(vehicles.length===0){
     return head+`<div class="veh-card"><div class="empty">${I.truckN("#9AA3AD",40)}
