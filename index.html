@@ -1747,7 +1747,6 @@ function baselineDocs(){
    拠点で在庫を保有し、出庫時に車両／案件へ配賦。出庫＝原価計上として拠点コスト・車両コストに連携する。
    品目は4カテゴリ（燃料・タイヤ・荷役機材・車両消耗品/法定備品）。各 costItem は原価項目(komoku)の内訳に一致。 */
 const INV_MONTHS=["2026-03","2026-04","2026-05","2026-06"];
-const INV_CUR_YM="2026-06";
 const INV_TODAY="2026-06-23";
 const INV_CATS=[
   {k:"fuel",   l:"燃料",                 komoku:"燃料費（自社タンク／ローリー仕入）", scope:"拠点", color:"#B87514", bg:"#FBEFD8", mode:"残量管理",     note:"自社タンク／ローリー仕入の残量管理。給油機・カード連携で車両別に出庫を自動記録"},
@@ -1849,18 +1848,6 @@ function invStock(id){
 function invIsCost(m){ if(m.cat==="equip") return (m.type==="in"&&m.note==="仕入")||m.type==="loss"; return m.type==="out"; }
 /* 月→日数差（期限管理） */
 function _daysUntil(d){ if(!d)return null; const t=new Date(d.length<=7?d+"-01":d), now=new Date(INV_TODAY); return Math.round((t-now)/86400000); }
-/* 在庫アラート（発注点割れ・法定備品期限・タイヤ残溝・機材紛失） */
-function invAlerts(){
-  const out=[];
-  INV_ITEMS.forEach(it=>{ const s=invStock(it.id);
-    if(s.qty<it.reorder) out.push({lv:s.qty<=it.reorder*0.5?"red":"yellow",cat:it.cat,t:`${it.name}（${it.office}）が発注点割れ`,d:`現在庫 ${s.qty}${it.unit} ／ 発注点 ${it.reorder}${it.unit}`,act:"要発注"});
-    const de=_daysUntil(it.expiry); if(de!=null&&de<=120) out.push({lv:de<=30?"red":"yellow",cat:it.cat,t:`${it.name}（法定備品）の使用期限が接近`,d:`期限 ${it.expiry} まで約${de}日`,act:"交換手配"});
-    const di=_daysUntil(it.inspect); if(di!=null&&di<=120) out.push({lv:di<=30?"red":"yellow",cat:it.cat,t:`${it.name}の点検期限が接近`,d:`点検期限 ${it.inspect} まで約${di}日`,act:"点検手配"});
-  });
-  INV_TIRE_MOUNT.forEach(t=>{ if(t.tread<=3.5) out.push({lv:t.tread<=2.5?"red":"yellow",cat:"tire",t:`タイヤ残溝あと僅か（${t.plate} ${t.pos}）`,d:`残溝 ${t.tread}mm ／ ${t.item}`,act:"交換推奨"}); });
-  buildInventory().moves.filter(m=>m.type==="loss").forEach(m=>{ const it=INV_ITEM[m.itemId]; out.push({lv:"yellow",cat:m.cat,t:`${it.name}の紛失（${m.party}）`,d:`${m.qty}${it.unit}・${yen(m.amount)}相当 ／ ${m.date}`,act:"回収・確認"}); });
-  return out;
-}
 
 /* ───── サンプル：車両コスト・拠点コストの数カ月分（決定論） ───── */
 function sampleCostDocs(){
@@ -4508,34 +4495,7 @@ function renderInventory(){
     <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 保管拠点</span><select onchange="setInvOffice(this.value)"><option value="all" ${state.invOffice==="all"?"selected":""}>全拠点</option>${CATEGORIES.map(o=>`<option value="${esc(o)}" ${state.invOffice===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>
   </div>`;
   const body=tab==="moves"?invMovesView():tab==="stocktake"?invStocktakeView():tab==="master"?invMasterView():invStockView();
-  return head+invKpis()+invAlertStrip()+seg+body;
-}
-function invKpis(){
-  const items=_invFilteredItems();
-  let val=0,low=0,inAmt=0,outAmt=0;
-  items.forEach(it=>{ const s=invStock(it.id); val+=s.value; if(s.qty<it.reorder) low++; });
-  buildInventory().moves.forEach(m=>{
-    if(state.invCat!=="all"&&m.cat!==state.invCat) return;
-    if(state.invOffice!=="all"&&m.office!==state.invOffice) return;
-    if(m.ym!==INV_CUR_YM) return;
-    if(m.type==="in"&&m.note==="仕入") inAmt+=m.amount;
-    if(invIsCost(m)) outAmt+=m.amount;
-  });
-  const k=(l,v,sub)=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}${sub?`<small> ${sub}</small>`:""}</div></div>`;
-  return `<div class="kpis">
-    ${k("在庫評価額（移動平均）",yen(val))}
-    ${k("発注点割れ",`${low}`,"品目")}
-    ${k("当月入庫額（仕入）",yen(inAmt))}
-    ${k("当月出庫＝原価計上",yen(outAmt))}
-  </div>`;
-}
-function invAlertStrip(){
-  let a=invAlerts();
-  if(state.invCat!=="all") a=a.filter(x=>x.cat===state.invCat);
-  if(!a.length) return "";
-  const ic=lv=>I.alert(lv==="red"?"#B23A2E":"#B87514",15);
-  const rows=a.slice(0,8).map(x=>`<div class="inv-chip" style="border-color:${x.lv==="red"?"#E7B7B0":"#EAD9AE"};background:${x.lv==="red"?"#FCF1EF":"#FBF5E7"}">${ic(x.lv)}<span><b style="font-family:var(--sans)">${esc(x.t)}</b><br><span style="color:var(--inkSoft)">${esc(x.d)}</span></span><span class="inv-badge ${x.lv==="red"?"b-loss":"b-out"}">${esc(x.act)}</span></div>`).join("");
-  return `<div class="inv-card"><h3>${I.alert("#B87514",16)} アラート（発注点・期限・残溝・紛失）<span class="inv-badge b-loss" style="margin-left:6px">${a.length}件</span></h3><div class="inv-map">${rows}</div></div>`;
+  return head+seg+body;
 }
 function invFlowNote(){
   return `<div class="inv-flow">${I.boxes("#0E5A40",15)} <b>拠点で在庫保有</b> <span class="ar">→</span> 出庫で <b>車両／案件へ配賦</b> <span class="ar">→</span> <b>出庫＝原価計上</b>（${INV_CATS.map(c=>invCatPill(c.k)).join(" ")}）<span class="ar">→</span> <button class="inv-link" onclick="setVehTab('sites')">拠点コストを見る</button> ／ <button class="inv-link" onclick="setVehTab('individual')">車両コストを見る</button></div>`;
