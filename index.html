@@ -739,6 +739,7 @@
   .an-lv.yellow{color:#8A5310;background:var(--amberSoft)}
   .crit-pop{width:360px;max-width:78vw;line-height:1.7;text-align:left;font-weight:600}
   .an-tip{margin-left:2px}
+  .an-tip.tip-right .crit-pop{left:auto;right:0}
   .an-main{flex:1;min-width:0}
   .an-l1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .an-scope{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:800;border-radius:6px;padding:1px 7px}
@@ -4020,7 +4021,7 @@ function detectAnomalies(){
   out.sort((x,y)=>y.lvScore-x.lvScore);
   return out;
 }
-function _critTip(html){ return `<span class="help an-tip" tabindex="0">?<span class="help-pop crit-pop">${html}</span></span>`; }
+function _critTip(html,align){ return `<span class="help an-tip ${align==="right"?"tip-right":""}" tabindex="0">?<span class="help-pop crit-pop">${html}</span></span>`; }
 function renderAnomalyPanel(anoms){
   const ruleLab={spike:"スパイク（急増）",trend:"トレンド（じわ増）",composition:"構成比異常"};
   const reds=anoms.filter(a=>a.level==="red").length;
@@ -4098,7 +4099,7 @@ function renderTcoPanel(vehicles){
     ・<b>経過年数</b>：実務目安（大型7〜10年 等）超過＝中〜強<br>
     ・<b>累計TCO</b>：想定更新額（取得額×係数／同型平均）超過＝強<br><br>
     <b>判定</b>：複数該当＝買い替え推奨(赤)／1つ該当＝要注意(黄)／非該当＝良好(緑)。<br>
-    TCO＝取得・リース＋燃料＋修繕・維持＋保険＋税金＋通行料＋調達コストの累計。しきい値は運用でチューニング。`);
+    TCO＝取得・リース＋燃料＋修繕・維持＋保険＋税金＋通行料＋調達コストの累計。しきい値は運用でチューニング。`,"right");
   return `<div class="veh-card tco-card">
     <div class="an-head">${I.truckN("#B87514",16)} <b>修繕費トレンド・買い替えサイン／累計TCO</b>${tip}<span class="an-hsub">走行距離不要・コスト推移と年式のみで判定</span>${reds?`<span class="an-count warn">買い替え推奨 ${reds}台${yellows?" / 要注意 "+yellows+"台":""}</span>`:(yellows?`<span class="an-count warn">要注意 ${yellows}台</span>`:"")}</div>
     <div class="tscroll tco-scroll"><table class="vt tco-tbl"><thead><tr><th>車番</th><th class="r">累計TCO</th><th class="r">修繕費累計</th><th>修繕費比率</th><th>経過年数</th><th>判定</th></tr></thead><tbody>${tr}</tbody></table></div></div>`;
