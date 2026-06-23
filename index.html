@@ -138,8 +138,6 @@
   .btn-ghost{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--line);color:var(--ink);border-radius:9px;padding:9px 15px;font-size:13.5px;font-weight:700;cursor:pointer}
   .btn-ghost:hover{border-color:var(--greenLine);color:var(--greenDark)}
   .btn-hist{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid var(--line);color:var(--inkSoft);border-radius:7px;padding:5px 9px;font-size:11.5px;font-weight:700;cursor:pointer}
-  .btn-hist.green{background:var(--green);border-color:var(--green);color:#fff}
-  .btn-hist.green:hover{background:var(--greenDark);border-color:var(--greenDark);color:#fff}
   .btn-hist:hover{background:#F5F6F8;color:var(--ink);border-color:#CFD5DD}
   .btn-hist .bh-ct{font-size:10px;font-family:var(--mono);font-weight:700;color:var(--inkSoft);background:#EEF0F3;border-radius:999px;padding:0 6px;margin-left:1px}
 
@@ -1185,9 +1183,9 @@ const CAT_STYLE={
    legacyCat：原価項目→既存6分類への対応（既存集計・グラフとの後方互換のため保持）。 */
 const COST_BUNRUI_STYLE={
   "変動費":{fg:"#0E7A4B",bg:"#E4F4EC"},
-  "固定費":{fg:"#236AAE",bg:"#E6EEF8"},
-  "間接費":{fg:"#9A6312",bg:"#F6ECDA"},
-  "その他直接費":{fg:"#6B4FA3",bg:"#EEEAF7"},
+  "固定費":{fg:"#157F73",bg:"#DCEFEC"},
+  "間接費":{fg:"#4C8A3F",bg:"#EAF3E1"},
+  "その他直接費":{fg:"#2F8F5B",bg:"#E7F4EB"},
 };
 function bunruiStyle(b){ return COST_BUNRUI_STYLE[b]||{fg:"#0E7A4B",bg:"#E4F4EC"}; }
 function greenCatStyle(c){ return COST_BUNRUI_STYLE[c]||{fg:"#0E7A4B",bg:"#E4F4EC"}; } // 後方互換
@@ -3880,8 +3878,8 @@ function renderVehIndividual(){
     <button class="btn-hist" onclick="openChangelog()" title="コスト内訳の変更履歴">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>
       変更履歴${clogUnseen>0?`<span class="bh-ct">${clogUnseen}</span>`:""}</button>
-    <button class="btn-hist green" onclick="openCostCsv('download','vehicle')" title="車両コストをCSVでダウンロード">${I.download("#fff",13)} CSVダウンロード</button>
-    <button class="btn-hist green" onclick="openCostCsv('import','vehicle')" title="車両コストをCSVから取り込み">${I.cloud("#fff",16)} CSVインポート</button>
+    <button class="veh-edit-btn" onclick="openCostCsv('download','vehicle')" title="車両コストをCSVでダウンロード">${I.download("#0E7A4B",13)} CSVダウンロード</button>
+    <button class="veh-edit-btn" onclick="openCostCsv('import','vehicle')" title="車両コストをCSVから取り込み">${I.cloud("#0E7A4B",16)} CSVインポート</button>
   </div>`;
   const filterBar=`<div class="veh-filters"><span class="vf-l">絞り込み</span>${catSel}${periodCtrl}</div>`;
 
@@ -3979,8 +3977,8 @@ function renderVehSites(){
   const head=`<div class="pagehead pagehead-veh">
     <div><p>連携済みの書類から、拠点（営業所）ごとに拠点コスト（荷役・施設・庸車・一般管理費など）を原価分類・原価項目別に集計します。1営業所＝1レコードで表示します。</p></div>
     <div class="ph-spacer"></div>
-    <button class="btn-hist green" onclick="openCostCsv('download','site')" title="拠点コストをCSVでダウンロード">${I.download("#fff",13)} CSVダウンロード</button>
-    <button class="btn-hist green" onclick="openCostCsv('import','site')" title="拠点コストをCSVから取り込み">${I.cloud("#fff",16)} CSVインポート</button>
+    <button class="veh-edit-btn" onclick="openCostCsv('download','site')" title="拠点コストをCSVでダウンロード">${I.download("#0E7A4B",13)} CSVダウンロード</button>
+    <button class="veh-edit-btn" onclick="openCostCsv('import','site')" title="拠点コストをCSVから取り込み">${I.cloud("#0E7A4B",16)} CSVインポート</button>
   </div>`;
   const note=`<div class="veh-note-bar">${I.alert("#B87514",14)} 拠点コストの明細データは連携準備中です。各原価項目の金額が連携されると、ここに自動で積み上がります。</div>`;
   const schema=siteMetrics("");
