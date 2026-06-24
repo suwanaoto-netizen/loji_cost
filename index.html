@@ -133,6 +133,7 @@
                border-radius:9px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08)}
   .btn-primary:hover{filter:brightness(1.06)}
   .btn-green{display:inline-flex;align-items:center;gap:7px;background:var(--green);color:#fff;border:none;border-radius:9px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer}
+  .btn-green.btn-sm{padding:7px 13px;font-size:12.5px;border-radius:8px}
   .btn-green:hover{filter:brightness(1.05)}
   .btn-green:disabled{background:#C6CEC6;cursor:not-allowed;filter:none}
   .btn-ghost{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--line);color:var(--ink);border-radius:9px;padding:9px 15px;font-size:13.5px;font-weight:700;cursor:pointer}
@@ -1784,7 +1785,15 @@ const INV_ITEMS=[
   {id:"C-TRI-OKZ",cat:"consum",name:"三角表示板",spec:"法定備品",unit:"個",price:2200,supplier:"カー用品法人",office:"岡崎営業所",reorder:5,costItem:"発炎筒・三角表示板・タイヤチェーン",open:8,inBase:6,inEvery:9,outBase:3},
   {id:"C-EXT-NGO",cat:"consum",name:"消火器",spec:"法定備品・点検期限あり",unit:"本",price:4500,supplier:"防災テック中部",office:"名古屋営業所",reorder:3,costItem:"発炎筒・三角表示板・タイヤチェーン",open:9,inBase:4,inEvery:9,outBase:2,inspect:"2026-08"},
 ];
-const INV_ITEM=Object.fromEntries(INV_ITEMS.map(it=>[it.id,it]));
+let INV_ITEM=Object.fromEntries(INV_ITEMS.map(it=>[it.id,it]));
+function rebuildInvItem(){ INV_ITEM=Object.fromEntries(INV_ITEMS.map(it=>[it.id,it])); }
+/* 原価項目の選択肢（カテゴリ別）。燃料・タイヤは車両コスト連携キー(INV_VEH_COST)に一致させる必要がある */
+const INV_COST_ITEM_OPTS={
+  fuel:["軽油（自社タンク）","ガソリン（自社タンク）","アドブルー（バルク）"],
+  tire:["新品タイヤ","夏冬タイヤ（スタッドレス）","更生タイヤ"],
+  equip:["荷役機材費（パレット・固縛資材・カゴ車）"],
+  consum:["バッテリー／ワイパー／電球","クーラント・ウォッシャー液","発炎筒・三角表示板・タイヤチェーン"],
+};
 /* タイヤ装着（1本単位のライフサイクル：装着車両・位置・装着日・走行距離・残溝） */
 const INV_TIRE_MOUNT=[
   {plate:"名古屋100か5678",pos:"前左",  item:"新品タイヤ 11R22.5", size:"11R22.5",   mountedAt:"2025-11-10",km:42000,tread:5.5},
@@ -1806,6 +1815,10 @@ let _INV=null;
 /* ユーザーが在庫管理ページから手動登録／編集した入出庫。生成分の後ろに連結する。 */
 const INV_USER_MOVES=[];
 let _invUserSeq=900000; // 手動moveのid（生成分と衝突しない大きな採番）
+/* ユーザーが追加した品目マスタ／既存品目への編集オーバーレイ */
+const INV_USER_ITEMS=[];          // 追加品目（INV_ITEMS にも push 済み）
+const INV_ITEM_EDITS={};          // 既存品目への上書き {id:{field:val}}
+let _invItemSeq=1;                // 追加品目id採番
 /* 手動moveを変更したら現在庫を再計算させる */
 function invalidateInventory(){ _INV=null; }
 function buildInventory(){
@@ -1816,7 +1829,8 @@ function buildInventory(){
   INV_ITEMS.forEach(it=>{
     const cat=INV_CAT[it.cat], seed=_hash(it.id)%9973;
     const base={itemId:it.id,cat:it.cat,office:it.office,komoku:cat.komoku,costItem:it.costItem,unit:it.unit};
-    moves.push({id:mid++,...base,type:"open",ym:"2026-03",date:"2026-03-01",qty:it.open,unitPrice:it.price,amount:it.open*it.price,party:"期首在庫",note:"期首"});
+    // 期首在庫はシミュレーション元データ(open)を持つ初期品目のみ生成。ユーザー追加品目は入出庫登録で積み上げる
+    if(it.open>0) moves.push({id:mid++,...base,type:"open",ym:"2026-03",date:"2026-03-01",qty:it.open,unitPrice:it.price,amount:it.open*it.price,party:"期首在庫",note:"期首"});
     INV_MONTHS.forEach((ym,mi)=>{
       // 入庫（仕入）：inEvery 周期で発生（inBase>0 のとき）
       if(it.inBase>0 && mi%it.inEvery===0){
@@ -2093,7 +2107,7 @@ let state={
   aiConfirm:null,   // 書類を開いた時の明細確認ステップ
   statusSel:[],   // 選択中のステータス（複数可・空＝すべて）
   categoryFilter:"all", vehCategoryFilter:"all", vehTab:"monitor",
-  invTab:"stock", invCat:"all", invOffice:"all", invMoveEdit:null,
+  invTab:"stock", invCat:"all", invOffice:"all", invMoveEdit:null, invItemEdit:null,
   chartOffice:"all", chart2Cat:"燃料費", chart2Klass:"all",
   trash:false, docTrashAction:null,
   q:"",
@@ -4692,6 +4706,114 @@ function renderInvMoveModal(){
     </div>
   </div></div>`;
 }
+/* ───── 品目マスタの追加・編集・削除（Phase 2） ───── */
+const INV_ITEMS_LS_KEY="loji_inv_items_v1";
+function saveInvItems(){ try{ localStorage.setItem(INV_ITEMS_LS_KEY, JSON.stringify({userItems:INV_USER_ITEMS, edits:INV_ITEM_EDITS, seq:_invItemSeq})); }catch(e){} }
+function loadInvItems(){ try{ const raw=localStorage.getItem(INV_ITEMS_LS_KEY); if(!raw) return;
+  const o=JSON.parse(raw); if(!o) return;
+  if(typeof o.seq==="number"&&o.seq>_invItemSeq) _invItemSeq=o.seq;
+  (o.userItems||[]).forEach(it=>{ if(it&&it.id&&!INV_ITEM[it.id]){ INV_ITEMS.push(it); INV_USER_ITEMS.push(it); } });
+  if(o.edits) Object.keys(o.edits).forEach(id=>{ INV_ITEM_EDITS[id]=o.edits[id]; const t=INV_ITEMS.find(x=>x.id===id); if(t) Object.assign(t,o.edits[id]); });
+  rebuildInvItem();
+}catch(e){} }
+function _invItemIsUser(id){ return INV_USER_ITEMS.some(x=>x.id===id); }
+function openInvItemNew(cat){
+  const c=cat||(state.invCat!=="all"?state.invCat:"fuel");
+  const office=(state.invOffice!=="all")?state.invOffice:CATEGORIES[0];
+  state.invItemEdit={mode:"new", id:null, cat:c, name:"", spec:"", unit:_invDefaultUnit(c), price:"", supplier:"", office,
+    reorder:"", costItem:(INV_COST_ITEM_OPTS[c]||[])[0]||"", cap:"", size:"", fit:"大型", expiry:"", inspect:""};
+  renderOverlay();
+}
+function openInvItemEdit(id){
+  const it=INV_ITEM[id]; if(!it){ toast("品目が見つかりません"); return; }
+  state.invItemEdit={mode:"edit", id:it.id, cat:it.cat, name:it.name||"", spec:it.spec||"", unit:it.unit||"",
+    price:it.price, supplier:it.supplier||"", office:it.office||"", reorder:it.reorder, costItem:it.costItem||"",
+    cap:it.cap||"", size:it.size||"", fit:it.fit||"", expiry:it.expiry||"", inspect:it.inspect||"", isUser:_invItemIsUser(it.id)};
+  renderOverlay();
+}
+function closeInvItem(){ state.invItemEdit=null; renderOverlay(); }
+function invItemField(k,v){ if(state.invItemEdit) state.invItemEdit[k]=v; }
+function invItemSetCat(v){ const e=state.invItemEdit; if(!e) return; e.cat=v; e.unit=_invDefaultUnit(v); e.costItem=(INV_COST_ITEM_OPTS[v]||[])[0]||""; renderOverlay(); }
+function _invDefaultUnit(cat){ return cat==="fuel"?"L":cat==="tire"?"本":cat==="equip"?"枚":"個"; }
+function _invItemFields(e){
+  const f={cat:e.cat, name:(e.name||"").trim(), spec:(e.spec||"").trim(), unit:(e.unit||"").trim()||_invDefaultUnit(e.cat),
+    price:Math.max(0,Math.round(+e.price||0)), supplier:(e.supplier||"").trim(), office:e.office||CATEGORIES[0],
+    reorder:Math.max(0,Math.round(+e.reorder||0)), costItem:(e.costItem||"").trim()};
+  if(e.cat==="fuel"){ f.cap=Math.max(0,Math.round(+e.cap||0)); }
+  if(e.cat==="tire"){ f.size=(e.size||"").trim(); f.fit=(e.fit||"").trim(); }
+  if(e.cat==="consum"){ if((e.expiry||"").trim()) f.expiry=(e.expiry||"").trim(); if((e.inspect||"").trim()) f.inspect=(e.inspect||"").trim(); }
+  return f;
+}
+function saveInvItem(){
+  const e=state.invItemEdit; if(!e) return;
+  if(!(e.name||"").trim()){ toast("品名を入力してください"); return; }
+  if(!e.office){ toast("保管拠点を選択してください"); return; }
+  if(!(e.costItem||"").trim()){ toast("原価項目を選択してください"); return; }
+  const f=_invItemFields(e);
+  if(e.mode==="new"){
+    const id=`U${e.cat}-${_invItemSeq++}`;
+    const it=Object.assign({id}, f);
+    INV_ITEMS.push(it); INV_USER_ITEMS.push(it);
+  } else {
+    const t=INV_ITEMS.find(x=>x.id===e.id); if(t){ Object.assign(t,f);
+      if(e.isUser){ const u=INV_USER_ITEMS.find(x=>x.id===e.id); if(u) Object.assign(u,f); }
+      else { INV_ITEM_EDITS[e.id]=Object.assign(INV_ITEM_EDITS[e.id]||{}, f); } }
+  }
+  rebuildInvItem(); invalidateInventory(); syncInvCostDocs(); saveInvItems();
+  state.invItemEdit=null; render();
+  toast(e.mode==="new"?"品目を追加しました":"品目を更新し、コストへ再連携しました");
+}
+function deleteInvItem(){
+  const e=state.invItemEdit; if(!e||e.mode!=="edit") return;
+  if(!e.isUser){ toast("初期データの品目は削除できません（編集のみ可能）"); return; }
+  const i=INV_ITEMS.findIndex(x=>x.id===e.id); if(i>=0) INV_ITEMS.splice(i,1);
+  const j=INV_USER_ITEMS.findIndex(x=>x.id===e.id); if(j>=0) INV_USER_ITEMS.splice(j,1);
+  for(let k=INV_USER_MOVES.length-1;k>=0;k--){ if(INV_USER_MOVES[k].itemId===e.id) INV_USER_MOVES.splice(k,1); }
+  rebuildInvItem(); invalidateInventory(); syncInvCostDocs(); saveInvItems(); saveInvUserMoves();
+  state.invItemEdit=null; render();
+  toast("品目を削除しました");
+}
+function renderInvItemModal(){
+  const e=state.invItemEdit; if(!e) return "";
+  const title=e.mode==="new"?"品目を追加":"品目を編集";
+  const cats=INV_CATS.map(c=>`<option value="${c.k}" ${e.cat===c.k?"selected":""}>${esc(c.l)}</option>`).join("");
+  const ciOpts=(INV_COST_ITEM_OPTS[e.cat]||[]).slice();
+  if(e.costItem&&!ciOpts.includes(e.costItem)) ciOpts.unshift(e.costItem);
+  const costSel=`<select class="in" onchange="invItemField('costItem',this.value)">${ciOpts.map(o=>`<option value="${esc(o)}" ${e.costItem===o?"selected":""}>${esc(o)}</option>`).join("")}</select>`;
+  let extra="";
+  if(e.cat==="fuel") extra=`<div class="fld"><label>タンク容量（L）</label><input class="in" type="number" min="0" value="${esc(e.cap)}" oninput="invItemField('cap',this.value)" placeholder="例：10000"></div>`;
+  else if(e.cat==="tire") extra=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="fld"><label>サイズ</label><input class="in" value="${esc(e.size)}" oninput="invItemField('size',this.value)" placeholder="例：11R22.5"></div><div class="fld"><label>適合車両</label><input class="in" value="${esc(e.fit)}" oninput="invItemField('fit',this.value)" placeholder="例：大型"></div></div>`;
+  else if(e.cat==="consum") extra=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="fld"><label>使用期限（任意・YYYY-MM）</label><input class="in" value="${esc(e.expiry)}" oninput="invItemField('expiry',this.value)" placeholder="例：2026-09"></div><div class="fld"><label>点検期限（任意・YYYY-MM）</label><input class="in" value="${esc(e.inspect)}" oninput="invItemField('inspect',this.value)" placeholder="例：2026-08"></div></div>`;
+  return `<div class="ovl ${state._ovFresh?'anim':''}" onclick="if(event.target===this)closeInvItem()"><div class="modal" style="width:min(580px,100%)">
+    <div class="m-head"><span class="t">${esc(title)}</span><button class="x" onclick="closeInvItem()">${I.x("#5A6472",18)}</button></div>
+    <div class="m-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld"><label>品目区分 ${e.mode==="edit"?'<span style="color:var(--inkFaint);font-size:10px">（変更不可）</span>':""}</label>
+          ${e.mode==="edit"?`<input class="in" readonly value="${esc(INV_CAT[e.cat].l)}" style="background:#F7F8F5">`:`<select class="in" onchange="invItemSetCat(this.value)">${cats}</select>`}</div>
+        <div class="fld"><label>保管拠点 <span style="color:var(--alert)">*</span></label>
+          <select class="in" onchange="invItemField('office',this.value)">${CATEGORIES.map(c=>`<option value="${esc(c)}" ${e.office===c?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
+      </div>
+      <div class="fld"><label>品名 <span style="color:var(--alert)">*</span></label><input class="in" value="${esc(e.name)}" oninput="invItemField('name',this.value)" placeholder="例：軽油"></div>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+        <div class="fld"><label>規格</label><input class="in" value="${esc(e.spec)}" oninput="invItemField('spec',this.value)" placeholder="例：自社タンク 10kL"></div>
+        <div class="fld"><label>単位</label><input class="in" value="${esc(e.unit)}" oninput="invItemField('unit',this.value)" placeholder="L／本／個"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fld"><label>標準単価（円）</label><input class="in" type="number" min="0" value="${esc(e.price)}" oninput="invItemField('price',this.value)" placeholder="0"></div>
+        <div class="fld"><label>発注点（${esc(e.unit||"数量")}）</label><input class="in" type="number" min="0" value="${esc(e.reorder)}" oninput="invItemField('reorder',this.value)" placeholder="0"></div>
+      </div>
+      <div class="fld"><label>仕入先</label><input class="in" value="${esc(e.supplier)}" oninput="invItemField('supplier',this.value)" placeholder="例：ENEOSウイング"></div>
+      <div class="fld"><label>原価項目 <span style="color:var(--alert)">*</span></label>${costSel}
+        <div style="font-size:11px;color:var(--inkSoft);margin-top:4px;line-height:1.6">出庫時にこの項目でコストへ連携します。${(e.cat==="fuel"||e.cat==="tire")?"<b>車両配賦分は車両コスト</b>へ自動計上されます。":"拠点コストへ計上されます。"}</div></div>
+      ${extra}
+    </div>
+    <div class="m-foot">
+      ${(e.mode==="edit"&&e.isUser)?`<button class="btn-cancel" style="margin-right:auto;color:var(--alert);border-color:#E0B8B2" onclick="deleteInvItem()">${I.trash("#B23A2E",14)} 削除</button>`:""}
+      <button class="btn-cancel" onclick="closeInvItem()">キャンセル</button>
+      <button class="btn-green" onclick="saveInvItem()">${I.check("#fff",14,3)} 保存する</button>
+    </div>
+  </div></div>`;
+}
 function _invFilteredItems(){ return INV_ITEMS.filter(it=>(state.invCat==="all"||it.cat===state.invCat)&&(state.invOffice==="all"||it.office===state.invOffice)); }
 function _invFilteredCats(){ return INV_CATS.filter(c=>state.invCat==="all"||c.k===state.invCat); }
 function invCatPill(k){ const c=INV_CAT[k]; return `<span class="catpill" style="color:${c.color};background:${c.bg}">${esc(c.l)}</span>`; }
@@ -4739,10 +4861,12 @@ function invStockTable(c){
       <td class="r">¥${Math.round(it.price).toLocaleString("ja-JP")}</td>
       <td class="r">${yen(s.value)}</td>
       <td>${invStatusCell(it,s)}</td>
-      <td style="font-size:11.5px;color:var(--inkSoft)">${memo}</td></tr>`;
+      <td style="font-size:11.5px;color:var(--inkSoft)">${memo}</td>
+      <td><button class="inv-link" onclick="openInvItemEdit('${esc(it.id)}')">${I.edit?I.edit("#177D58",13):"✎"} 編集</button></td></tr>`;
   }).join("");
-  return `<div class="inv-card"><h3>${invCatPill(c.k)} ${esc(c.l)} <span class="sub" style="margin:0 0 0 4px">／ ${esc(c.mode)}</span></h3><p class="sub">${esc(c.note)}　原価項目：<b>${esc(c.komoku)}</b></p>
-    <div class="tscroll"><table class="invt"><thead><tr><th>品目・規格</th><th>保管拠点</th><th class="r">現在庫</th><th class="r">発注点</th><th class="r">標準単価</th><th class="r">在庫評価額</th><th>状態</th><th>摘要</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  return `<div class="inv-card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${invCatPill(c.k)} ${esc(c.l)} <span class="sub" style="margin:0 0 0 4px">／ ${esc(c.mode)}</span></h3><span style="flex:1"></span><button class="btn-green btn-sm" onclick="openInvItemNew('${c.k}')">${I.plus()} 品目を追加</button></div>
+    <p class="sub">${esc(c.note)}　原価項目：<b>${esc(c.komoku)}</b></p>
+    <div class="tscroll"><table class="invt"><thead><tr><th>品目・規格</th><th>保管拠点</th><th class="r">現在庫</th><th class="r">発注点</th><th class="r">標準単価</th><th class="r">在庫評価額</th><th>状態</th><th>摘要</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 function invTireDetail(){
   const rows=INV_TIRE_MOUNT.map(t=>{ const low=t.tread<=3.5;
@@ -5336,7 +5460,7 @@ function renderCostCsvModal(){
 let _ovKind="";
 function renderOverlay(){
   const ov=document.getElementById("overlay");
-  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": state.costCsv?"costcsv": state.invMoveEdit?"invmove": "";
+  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": state.costCsv?"costcsv": state.invMoveEdit?"invmove": state.invItemEdit?"invitem": "";
   state._ovFresh = (kind!=="" && kind!==_ovKind); // 同じオーバーレイの再描画ではアニメさせない
   _ovKind=kind;
   let h="";
@@ -5353,6 +5477,7 @@ function renderOverlay(){
   else if(state.masterEdit) h=renderMasterEditModal();
   else if(state.costCsv) h=renderCostCsvModal();
   else if(state.invMoveEdit) h=renderInvMoveModal();
+  else if(state.invItemEdit) h=renderInvItemModal();
   if(state.reflectConfirm) h+=renderReflectConfirm(); // 既存オーバーレイの上に確認モーダルを重ねる
   if(state.enterConfirm) h+=renderEnterConfirm();
   if(state.officeConfirm) h+=renderOfficeConfirm();
@@ -5425,9 +5550,10 @@ function render(){
     setTimeout(()=>{ const el=document.getElementById(id); if(el){ el.scrollIntoView({behavior:"smooth",block:"center"}); el.classList.add("pk-flash"); setTimeout(()=>el.classList.remove("pk-flash"),1600); } },60);
   }
 }
-// 手動登録した入出庫を localStorage から復元し、在庫派生のコスト書類を再連携
+// 品目マスタの追加・編集と手動入出庫を localStorage から復元し、在庫派生のコスト書類を再連携
+loadInvItems();
 loadInvUserMoves();
-if(INV_USER_MOVES.length) syncInvCostDocs();
+if(INV_USER_MOVES.length || INV_USER_ITEMS.length || Object.keys(INV_ITEM_EDITS).length) syncInvCostDocs();
 freezeReflectedLines();
 seedChangelog();
 // 連携アラートを localStorage から復元（無ければ初回連携でベースライン確立）
