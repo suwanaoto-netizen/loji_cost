@@ -1109,6 +1109,7 @@
   table.invt td.r,table.invt th.r{text-align:right;font-family:var(--mono)}
   table.invt tr:last-child td{border-bottom:none}
   table.invt tr.lowrow td{background:#FCF1EF}
+  table.invt tr.urow td{background:#F1FAF4}
   .inv-flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--inkSoft);margin-bottom:14px;background:var(--greenSoft);border:1px solid var(--greenLine);border-radius:10px;padding:10px 14px}
   .inv-flow b{color:var(--greenDark)}
   .inv-flow .ar{color:var(--green);font-weight:800}
@@ -1802,6 +1803,11 @@ function _invParty(it,seed,mi){
 function _invRnd(seed){ const x=Math.sin(seed*12.9898)*43758.5453; return x-Math.floor(x); }
 /* 入出庫トランザクションを決定論で生成し、現在庫・評価額を算定 */
 let _INV=null;
+/* ユーザーが在庫管理ページから手動登録／編集した入出庫。生成分の後ろに連結する。 */
+const INV_USER_MOVES=[];
+let _invUserSeq=900000; // 手動moveのid（生成分と衝突しない大きな採番）
+/* 手動moveを変更したら現在庫を再計算させる */
+function invalidateInventory(){ _INV=null; }
 function buildInventory(){
   if(_INV) return _INV;
   const moves=[]; let mid=1;
@@ -1849,8 +1855,33 @@ function buildInventory(){
     // 紛失（荷役機材）：カゴ車で1件
     if(it.id==="E-CAGE-OKZ") moves.push({id:mid++,...base,type:"loss",ym:"2026-05",date:"2026-05-22",qty:2,unitPrice:it.price,amount:2*it.price,party:"丸和ロジ 春日井DC",note:"紛失"});
   });
+  // 手動登録分を連結（INV_ITEM に紐づくもののみ。日付の整合は表示側でソート）
+  INV_USER_MOVES.forEach(m=>{ if(INV_ITEM[m.itemId]) moves.push(m); });
   _INV={items:INV_ITEMS,moves};
   return _INV;
+}
+/* 手動moveの生成：品目マスタから cat/office/komoku/costItem/unit を補完し金額を算定 */
+function invDefaultNote(cat,type){
+  if(type==="open") return "期首";
+  if(type==="loss") return "紛失";
+  if(type==="in")   return "仕入";
+  return cat==="tire"?"装着":cat==="equip"?"貸出":cat==="consum"?"取付":"配賦";
+}
+function invBuildUserMove(f){
+  const it=INV_ITEM[f.itemId]; if(!it) return null;
+  const c=INV_CAT[it.cat];
+  const qty=Math.max(0,Math.round(+f.qty||0));
+  const up=Math.max(0,Math.round(+f.unitPrice||it.price));
+  let allocTo=""; // 配賦先は出庫のみ意味を持つ
+  if(f.type==="out") allocTo=(f.allocTo==="車両")?"車両":"拠点";
+  const ym=(f.date||"").slice(0,7);
+  const note=(f.note&&f.note.trim())?f.note.trim():invDefaultNote(it.cat,f.type);
+  let party=(f.party||"").trim();
+  if(!party) party=(f.type==="in")?it.supplier:(allocTo==="拠点"?"（拠点共通）":"");
+  return {id:f.id||_invUserSeq++, itemId:it.id, cat:it.cat, office:it.office,
+    komoku:c.komoku, costItem:it.costItem, unit:it.unit,
+    type:f.type, ym, date:f.date, qty, unitPrice:up, amount:qty*up,
+    party, allocTo, note, userAdded:true};
 }
 /* 1品目の在庫サマリー：現在庫・移動平均評価額・貸出中・直近入出庫 */
 function invStock(id){
@@ -1914,8 +1945,20 @@ function sampleCostDocs(){
         SL("荷役作業委託費（積込・取卸）","荷役関連費用",dd(ym,25),82000+oi*9000),
       ]});
   }); });
-  /* 在庫の出庫＝原価計上（在庫管理タブと同一データ源）。
-     車両配賦分（燃料・タイヤ）は車両コストへ、拠点共通・取付・荷役購入分は拠点コストへ連携。office×月で集計。 */
+  /* 在庫の出庫＝原価計上（在庫管理タブと同一データ源）。手動登録分も含め再生成できるよう関数化。 */
+  buildInvCostDocs().forEach(d=>out.push(d));
+  /* 四半期：貨物保険（3月・6月） */
+  ["2026-03","2026-06"].forEach(ym=>{ CATEGORIES.slice(0,3).forEach((office,oi)=>{
+    out.push({name:`貨物保険_損害保険_${office}_${ym2(ym)}.pdf`, vendor:"損害保険会社", cat:"保険料請求書", status:"連携済み", category:office,
+      lines:[SL("貨物賠償責任保険料（運送保険）","貨物保険・賠償（貨物事故）",dd(ym,5),48000+oi*6000)]});
+  }); });
+  return out;
+}
+/* 在庫の出庫→原価計上の書類を現在の入出庫（生成分＋手動登録分）から生成。
+   車両配賦分（燃料・タイヤ）は車両コストへ、拠点共通・取付・荷役購入分は拠点コストへ連携。office×月で集計。
+   invDerived:true でマークし、手動登録のたびに syncInvCostDocs() で再生成できるようにする。 */
+function buildInvCostDocs(){
+  const out=[]; const ym2=ym=>ym.replace('-',''); const dd=(ym,day)=>`${ym}-${String(day).padStart(2,"0")}`;
   const siteAgg={}, vehAgg={};
   buildInventory().moves.filter(invIsCost).forEach(m=>{
     const k=m.office+"|"+m.ym;
@@ -1924,21 +1967,24 @@ function sampleCostDocs(){
   });
   Object.keys(siteAgg).forEach(k=>{ const [office,ym]=k.split("|"); const g=siteAgg[k];
     const lines=Object.keys(g).map(ci=>SL(ci,g[ci].komoku,dd(ym,20),Math.round(g[ci].amount)));
-    if(lines.length) out.push({name:`在庫消費_拠点計上_${office}_${ym2(ym)}.pdf`, vendor:"在庫管理（出庫＝原価計上）", cat:"在庫出庫明細", status:"連携済み", category:office, lines});
+    if(lines.length) out.push({name:`在庫消費_拠点計上_${office}_${ym2(ym)}.pdf`, vendor:"在庫管理（出庫＝原価計上）", cat:"在庫出庫明細", status:"連携済み", category:office, invDerived:true, lines});
   });
   Object.keys(vehAgg).forEach(k=>{ const [office,ym]=k.split("|");
     const byVehItem={};
     vehAgg[k].forEach(m=>{ const mp=INV_VEH_COST[m.costItem]; const kk=m.party+"｜"+mp.item;
       const o=byVehItem[kk]||(byVehItem[kk]={plate:m.party,cat:mp.cat,item:mp.item,amount:0}); o.amount+=m.amount; });
     const lines=Object.values(byVehItem).map(o=>L(o.item,o.plate,o.cat,dd(ym,16),Math.round(o.amount),.98));
-    if(lines.length) out.push({name:`在庫配賦_車両別_${office}_${ym2(ym)}.pdf`, vendor:"在庫管理（出庫→車両配賦）", cat:"在庫出庫明細", status:"連携済み", category:office, lines});
+    if(lines.length) out.push({name:`在庫配賦_車両別_${office}_${ym2(ym)}.pdf`, vendor:"在庫管理（出庫→車両配賦）", cat:"在庫出庫明細", status:"連携済み", category:office, invDerived:true, lines});
   });
-  /* 四半期：貨物保険（3月・6月） */
-  ["2026-03","2026-06"].forEach(ym=>{ CATEGORIES.slice(0,3).forEach((office,oi)=>{
-    out.push({name:`貨物保険_損害保険_${office}_${ym2(ym)}.pdf`, vendor:"損害保険会社", cat:"保険料請求書", status:"連携済み", category:office,
-      lines:[SL("貨物賠償責任保険料（運送保険）","貨物保険・賠償（貨物事故）",dd(ym,5),48000+oi*6000)]});
-  }); });
   return out;
+}
+/* 手動登録/編集で在庫が変わったら、在庫派生のコスト書類を total replace して再連携する */
+function syncInvCostDocs(){
+  invalidateInventory();
+  // 既存の在庫派生 doc とその明細を除去
+  for(let i=docs.length-1;i>=0;i--){ if(docs[i].invDerived){ writeLines(docs[i].id, []); docs.splice(i,1); } }
+  // 現在の在庫から再生成して push（連携済みとして明細を凍結）
+  buildInvCostDocs().forEach(d=>{ pushDoc(d); const last=docs[docs.length-1]; if(last) freezeLinesOf(last.id); });
 }
 /* 異常検知・買い替えサインのデモ用：明確なスパイク／右肩上がりを仕込む */
 function anomalyDemoDocs(){
@@ -1973,9 +2019,10 @@ function writeLines(docId, lines){
   (lines||[]).forEach(l=>{ const c=JSON.parse(JSON.stringify(l)); c.docId=docId; LINES.push(c); });
 }
 function maxLineDate(s){ return s.lines.map(l=>l.inspectedAt).sort().slice(-1)[0]||""; }
+let _pushSeq=0; // pushDoc 用の単調増加id採番（doc削除後の再追加でも衝突しない）
 function pushDoc(s){ const reflectedAt=s.status==="連携済み"?(maxLineDate(s)+" 09:00:00"):null;
   const category=s.category||CATEGORIES[docs.length%CATEGORIES.length];
-  const id="d"+(docs.length+1);
+  const id="d"+(++_pushSeq);
   const {lines, ...rest}=s;
   docs.push(Object.assign({id, no:NEXT_NO++, deleted:false, reflectedAt, category}, rest));
   (lines||[]).forEach(l=>{ l.docId=id; LINES.push(l); }); }
@@ -2046,7 +2093,7 @@ let state={
   aiConfirm:null,   // 書類を開いた時の明細確認ステップ
   statusSel:[],   // 選択中のステータス（複数可・空＝すべて）
   categoryFilter:"all", vehCategoryFilter:"all", vehTab:"monitor",
-  invTab:"stock", invCat:"all", invOffice:"all",
+  invTab:"stock", invCat:"all", invOffice:"all", invMoveEdit:null,
   chartOffice:"all", chart2Cat:"燃料費", chart2Klass:"all",
   trash:false, docTrashAction:null,
   q:"",
@@ -4523,6 +4570,128 @@ function setVehTab(t){ state.vehTab=t; render(); }
 function setInvTab(t){ state.invTab=t; render(); }
 function setInvCat(v){ state.invCat=v; render(); }
 function setInvOffice(v){ state.invOffice=v; render(); }
+/* ───── 入出庫の手動登録・編集・削除 ───── */
+function _invDefaultItemId(){ const f=_invFilteredItems(); return (f[0]||INV_ITEMS[0]).id; }
+function openInvMoveNew(){
+  const id=_invDefaultItemId(); const it=INV_ITEM[id];
+  state.invMoveEdit={mode:"new", id:null, itemId:id, type:"in", date:INV_TODAY,
+    qty:"", unitPrice:it?it.price:"", party:"", allocTo:(it&&(it.cat==="fuel"||it.cat==="tire"))?"車両":"拠点", note:""};
+  renderOverlay();
+}
+function openInvMoveEdit(mid){
+  const m=INV_USER_MOVES.find(x=>x.id===+mid); if(!m){ toast("この履歴は手動登録分ではないため編集できません"); return; }
+  state.invMoveEdit={mode:"edit", id:m.id, itemId:m.itemId, type:m.type, date:m.date,
+    qty:m.qty, unitPrice:m.unitPrice, party:m.party, allocTo:m.allocTo||"拠点", note:m.note||""};
+  renderOverlay();
+}
+function closeInvMove(){ state.invMoveEdit=null; renderOverlay(); }
+function invMoveField(k,v){ if(state.invMoveEdit) state.invMoveEdit[k]=v; }
+/* 区分・品目・配賦先が変わったら配賦先(party)を既定に戻して再描画 */
+function invMoveSetItem(v){ const e=state.invMoveEdit; if(!e) return; e.itemId=v; const it=INV_ITEM[v];
+  if(it){ e.unitPrice=it.price; if(it.cat!=="fuel"&&it.cat!=="tire") e.allocTo="拠点"; } e.party=""; renderOverlay(); }
+function invMoveSetType(v){ const e=state.invMoveEdit; if(!e) return; e.type=v; e.party=""; renderOverlay(); }
+function invMoveSetAlloc(v){ const e=state.invMoveEdit; if(!e) return; e.allocTo=v; e.party=""; renderOverlay(); }
+/* 金額・連携先プレビュー（保存前の確認用） */
+function invMovePreview(e){
+  const it=INV_ITEM[e.itemId]; if(!it) return {amount:0,link:"—",unit:""};
+  const qty=Math.max(0,Math.round(+e.qty||0)); const up=Math.max(0,Math.round(+e.unitPrice||it.price));
+  const allocTo=(e.type==="out")?(e.allocTo==="車両"?"車両":"拠点"):"";
+  const m={cat:it.cat,type:e.type,note:(e.note&&e.note.trim())||invDefaultNote(it.cat,e.type),allocTo,costItem:it.costItem};
+  let link;
+  if(invIsCost(m)){
+    if(m.allocTo==="車両"&&INV_VEH_COST[m.costItem]) link=`車両コストへ計上（${INV_VEH_COST[m.costItem].cat}）`;
+    else link=`拠点コストへ計上（${INV_CAT[it.cat].komoku}）`;
+  } else link="原価計上なし（在庫増のみ）";
+  return {amount:qty*up,link,unit:it.unit};
+}
+function invMoveRecalc(){ const e=state.invMoveEdit; if(!e) return; const p=invMovePreview(e);
+  const a=document.getElementById("imv-amt"); if(a) a.textContent=yen(p.amount);
+  const l=document.getElementById("imv-link"); if(l) l.textContent=p.link; }
+function saveInvMove(){
+  const e=state.invMoveEdit; if(!e) return;
+  if(!INV_ITEM[e.itemId]){ toast("品目を選択してください"); return; }
+  if(!e.date){ toast("日付を入力してください"); return; }
+  if(!(Math.round(+e.qty)>0)){ toast("数量を1以上で入力してください"); return; }
+  const mv=invBuildUserMove(e); if(!mv){ toast("登録に失敗しました"); return; }
+  if(e.mode==="edit"){ const i=INV_USER_MOVES.findIndex(x=>x.id===e.id); if(i>=0){ mv.id=e.id; INV_USER_MOVES[i]=mv; } else INV_USER_MOVES.push(mv); }
+  else INV_USER_MOVES.push(mv);
+  syncInvCostDocs(); saveInvUserMoves();
+  state.invMoveEdit=null; render();
+  toast(e.mode==="new"?"入出庫を登録し、コストへ連携しました":"入出庫を更新し、コストへ再連携しました");
+}
+function deleteInvMove(){
+  const e=state.invMoveEdit; if(!e||e.mode!=="edit") return;
+  const i=INV_USER_MOVES.findIndex(x=>x.id===e.id);
+  if(i>=0) INV_USER_MOVES.splice(i,1);
+  syncInvCostDocs(); saveInvUserMoves();
+  state.invMoveEdit=null; render();
+  toast("入出庫を削除し、コストへ再連携しました");
+}
+/* localStorage 永続化（手動登録分のみ。リロードしても連携状態を保持） */
+const INV_LS_KEY="loji_inv_user_moves_v1";
+function saveInvUserMoves(){ try{ localStorage.setItem(INV_LS_KEY, JSON.stringify(INV_USER_MOVES)); }catch(e){} }
+function loadInvUserMoves(){ try{ const raw=localStorage.getItem(INV_LS_KEY); if(!raw) return;
+  const arr=JSON.parse(raw); if(!Array.isArray(arr)) return;
+  arr.forEach(m=>{ if(INV_ITEM[m.itemId]){ INV_USER_MOVES.push(m); if(+m.id>=_invUserSeq) _invUserSeq=+m.id+1; } });
+}catch(e){} }
+function renderInvMoveModal(){
+  const e=state.invMoveEdit; if(!e) return "";
+  const it=INV_ITEM[e.itemId]||INV_ITEMS[0];
+  const title=e.mode==="new"?"入出庫を登録":"入出庫を編集";
+  const types=[["in","入庫（仕入）"],["out","出庫"],["loss","紛失"],["open","期首"]];
+  // 品目セレクト（カテゴリ別 optgroup）
+  const itemOpts=INV_CATS.map(c=>`<optgroup label="${esc(c.l)}">${INV_ITEMS.filter(x=>x.cat===c.k).map(x=>`<option value="${x.id}" ${e.itemId===x.id?"selected":""}>${esc(x.name)}／${esc(x.spec)}（${esc(x.office)}）</option>`).join("")}</optgroup>`).join("");
+  // 配賦先トグル（燃料・タイヤの出庫のみ）
+  const showAlloc=e.type==="out"&&(it.cat==="fuel"||it.cat==="tire");
+  const allocSeg=showAlloc?`<div class="fld"><label>配賦先</label>
+    <div class="seg" style="display:inline-flex">${[["車両","車両へ配賦"],["拠点","拠点共通"]].map(([k,l])=>`<button type="button" class="${e.allocTo===k?"on":""}" onclick="invMoveSetAlloc('${k}')">${esc(l)}</button>`).join("")}</div></div>`:"";
+  // 取引先／配賦先フィールド（区分により内容が変化）
+  let partyCtl="";
+  const plates=_invVehicles(it.office);
+  const selOf=(arr,label)=>{ if(!arr.length) return `<input class="in" value="${esc(e.party)}" oninput="invMoveField('party',this.value)" placeholder="${esc(label)}">`;
+    if(!e.party||!arr.includes(e.party)) e.party=arr[0];
+    return `<select class="in" onchange="invMoveField('party',this.value)">${arr.map(p=>`<option value="${esc(p)}" ${e.party===p?"selected":""}>${esc(p)}</option>`).join("")}</select>`; };
+  if(e.type==="in"){ if(!e.party) e.party=it.supplier;
+    partyCtl=`<div class="fld"><label>仕入先</label><input class="in" value="${esc(e.party)}" oninput="invMoveField('party',this.value)" placeholder="${esc(it.supplier)}"></div>`; }
+  else if(e.type==="open"){ e.party="期首在庫";
+    partyCtl=`<div class="fld"><label>区分</label><input class="in" readonly value="期首在庫" style="background:#F7F8F5"></div>`; }
+  else if(e.type==="loss"){
+    partyCtl=`<div class="fld"><label>紛失元（任意）</label>${it.cat==="equip"?selOf(INV_LOANERS,"貸出先"):`<input class="in" value="${esc(e.party)}" oninput="invMoveField('party',this.value)" placeholder="紛失元">`}</div>`; }
+  else { // out
+    if(it.cat==="equip") partyCtl=`<div class="fld"><label>貸出先</label>${selOf(INV_LOANERS,"貸出先")}</div>`;
+    else if(e.allocTo==="車両") partyCtl=`<div class="fld"><label>配賦先（車両）</label>${selOf(plates,"車両番号")}</div>`;
+    else if(it.cat==="consum") partyCtl=`<div class="fld"><label>取付車両（任意）</label>${selOf(plates,"車両番号")}</div>`;
+    else { e.party="（拠点共通）"; partyCtl=`<div class="fld"><label>配賦先</label><input class="in" readonly value="（拠点共通）" style="background:#F7F8F5"></div>`; }
+  }
+  const p=invMovePreview(e);
+  return `<div class="ovl ${state._ovFresh?'anim':''}" onclick="if(event.target===this)closeInvMove()"><div class="modal" style="width:min(560px,100%)">
+    <div class="m-head"><span class="t">${esc(title)}</span><button class="x" onclick="closeInvMove()">${I.x("#5A6472",18)}</button></div>
+    <div class="m-body">
+      <div class="fld"><label>品目 <span style="color:var(--alert)">*</span></label>
+        <select class="in" onchange="invMoveSetItem(this.value)">${itemOpts}</select></div>
+      <div class="fld"><label>入出庫区分</label>
+        <div class="seg" style="display:inline-flex">${types.map(([k,l])=>`<button type="button" class="${e.type===k?"on":""}" onclick="invMoveSetType('${k}')">${esc(l)}</button>`).join("")}</div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="fld"><label>日付 <span style="color:var(--alert)">*</span></label>
+          <input class="in" type="date" value="${esc(e.date)}" oninput="invMoveField('date',this.value)"></div>
+        <div class="fld"><label>数量（${esc(it.unit)}） <span style="color:var(--alert)">*</span></label>
+          <input class="in" type="number" min="0" value="${esc(e.qty)}" oninput="invMoveField('qty',this.value);invMoveRecalc()" placeholder="0"></div>
+        <div class="fld"><label>単価（円）</label>
+          <input class="in" type="number" min="0" value="${esc(e.unitPrice)}" oninput="invMoveField('unitPrice',this.value);invMoveRecalc()" placeholder="${it.price}"></div>
+      </div>
+      ${allocSeg}
+      ${partyCtl}
+      <div class="fld"><label>摘要（任意）</label>
+        <input class="in" value="${esc(e.note)}" oninput="invMoveField('note',this.value)" placeholder="${esc(invDefaultNote(it.cat,e.type))}"></div>
+      <div class="inv-flow" style="margin:6px 0 0">${I.boxes("#0E5A40",15)} 金額 <b id="imv-amt" style="font-family:var(--mono)">${yen(p.amount)}</b>　<span class="ar">→</span> <b id="imv-link">${esc(p.link)}</b></div>
+    </div>
+    <div class="m-foot">
+      ${e.mode==="edit"?`<button class="btn-cancel" style="margin-right:auto;color:var(--alert);border-color:#E0B8B2" onclick="deleteInvMove()">${I.trash("#B23A2E",14)} 削除</button>`:""}
+      <button class="btn-cancel" onclick="closeInvMove()">キャンセル</button>
+      <button class="btn-green" onclick="saveInvMove()">${I.check("#fff",14,3)} 保存する</button>
+    </div>
+  </div></div>`;
+}
 function _invFilteredItems(){ return INV_ITEMS.filter(it=>(state.invCat==="all"||it.cat===state.invCat)&&(state.invOffice==="all"||it.office===state.invOffice)); }
 function _invFilteredCats(){ return INV_CATS.filter(c=>state.invCat==="all"||c.k===state.invCat); }
 function invCatPill(k){ const c=INV_CAT[k]; return `<span class="catpill" style="color:${c.color};background:${c.bg}">${esc(c.l)}</span>`; }
@@ -4533,6 +4702,8 @@ function renderInventory(){
   const seg=`<div class="inv-bar"><div class="seg">${segs.map(([k,l])=>`<button class="${tab===k?"on":""}" onclick="setInvTab('${k}')">${esc(l)}</button>`).join("")}</div>
     <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 品目区分</span><select onchange="setInvCat(this.value)"><option value="all" ${state.invCat==="all"?"selected":""}>すべて</option>${INV_CATS.map(c=>`<option value="${c.k}" ${state.invCat===c.k?"selected":""}>${esc(c.l)}</option>`).join("")}</select></div>
     <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 保管拠点</span><select onchange="setInvOffice(this.value)"><option value="all" ${state.invOffice==="all"?"selected":""}>全拠点</option>${CATEGORIES.map(o=>`<option value="${esc(o)}" ${state.invOffice===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>
+    <span class="sp"></span>
+    <button class="btn-green" onclick="openInvMoveNew()">${I.plus()} 入出庫を登録</button>
   </div>`;
   const body=tab==="moves"?invMovesView():invStockView();
   return head+seg+`<div class="inv-scroll">${body}</div>`;
@@ -4627,11 +4798,12 @@ function invMovesView(){
   const costCell=m=>{ if(!invIsCost(m)) return `<span style="color:var(--inkFaint)">—</span>`;
     if(m.allocTo==="車両"&&INV_VEH_COST[m.costItem]) return `<button class="inv-link" onclick="setVehTab('individual')">車両コストへ計上</button> <span style="color:var(--inkSoft);font-size:10.5px">${esc(INV_VEH_COST[m.costItem].cat)}</span>`;
     return `<button class="inv-link" onclick="setVehTab('sites')">拠点コストへ計上</button> <span style="color:var(--inkSoft);font-size:10.5px">${esc(m.komoku)}</span>`; };
+  const opCell=m=>m.userAdded?`<button class="inv-link" onclick="openInvMoveEdit(${m.id})">${I.edit?I.edit("#177D58",13):"✎"} 編集</button>`:`<span style="color:var(--inkFaint)">—</span>`;
   const rows=ms.map(m=>{ const it=INV_ITEM[m.itemId];
-    return `<tr><td>${esc(m.date)}</td><td>${invCatPill(m.cat)}</td><td>${badge(m)}</td><td><b>${esc(it.name)}</b> <span style="color:var(--inkSoft);font-size:11px">${esc(it.spec)}</span></td><td>${esc(m.office)}</td><td class="r">${(m.type==="out"||m.type==="loss")?"−":"+"}${m.qty.toLocaleString("ja-JP")} ${esc(it.unit)}</td><td class="r">¥${Math.round(m.unitPrice).toLocaleString("ja-JP")}</td><td class="r">${yen(m.amount)}</td><td>${partyCell(m)}</td><td>${costCell(m)}</td></tr>`;
+    return `<tr class="${m.userAdded?"urow":""}"><td>${esc(m.date)}${m.userAdded?` <span class="inv-badge pill-ok" style="font-size:9.5px">登録</span>`:""}</td><td>${invCatPill(m.cat)}</td><td>${badge(m)}</td><td><b>${esc(it.name)}</b> <span style="color:var(--inkSoft);font-size:11px">${esc(it.spec)}</span></td><td>${esc(m.office)}</td><td class="r">${(m.type==="out"||m.type==="loss")?"−":"+"}${m.qty.toLocaleString("ja-JP")} ${esc(it.unit)}</td><td class="r">¥${Math.round(m.unitPrice).toLocaleString("ja-JP")}</td><td class="r">${yen(m.amount)}</td><td>${partyCell(m)}</td><td>${costCell(m)}</td><td>${opCell(m)}</td></tr>`;
   }).join("");
-  return invFlowNote()+`<div class="inv-card"><h3>${I.docs("#177D58",16)} 入出庫履歴 <span class="sub" style="margin-left:4px">直近60件</span></h3><p class="sub">請求書・納品書からの自動取込、給油機・デジタコ連携、バーコード/QRでの入出庫を想定。出庫はそのまま原価計上に連携。</p>
-    <div class="tscroll"><table class="invt"><thead><tr><th>日付</th><th>区分</th><th>入出庫</th><th>品目</th><th>拠点</th><th class="r">数量</th><th class="r">単価</th><th class="r">金額</th><th>仕入先／配賦先</th><th>原価連携</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  return invFlowNote()+`<div class="inv-card"><h3>${I.docs("#177D58",16)} 入出庫履歴 <span class="sub" style="margin-left:4px">直近60件</span></h3><p class="sub">請求書・納品書からの自動取込、給油機・デジタコ連携、バーコード/QRでの入出庫を想定。<b>「入出庫を登録」</b>から手動でも追加でき、出庫はそのまま原価計上に連携されます。</p>
+    <div class="tscroll"><table class="invt"><thead><tr><th>日付</th><th>区分</th><th>入出庫</th><th>品目</th><th>拠点</th><th class="r">数量</th><th class="r">単価</th><th class="r">金額</th><th>仕入先／配賦先</th><th>原価連携</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 /* ───── 車両のゴミ箱（確認ステップ＋変更履歴） ───── */
 function toggleVehTrash(){ state.vehTrashView=!state.vehTrashView; state.vehPage=1; render(); }
@@ -5164,7 +5336,7 @@ function renderCostCsvModal(){
 let _ovKind="";
 function renderOverlay(){
   const ov=document.getElementById("overlay");
-  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": state.costCsv?"costcsv": "";
+  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": state.costCsv?"costcsv": state.invMoveEdit?"invmove": "";
   state._ovFresh = (kind!=="" && kind!==_ovKind); // 同じオーバーレイの再描画ではアニメさせない
   _ovKind=kind;
   let h="";
@@ -5180,6 +5352,7 @@ function renderOverlay(){
   else if(state.vehEditKey) h=renderVehEditModal();
   else if(state.masterEdit) h=renderMasterEditModal();
   else if(state.costCsv) h=renderCostCsvModal();
+  else if(state.invMoveEdit) h=renderInvMoveModal();
   if(state.reflectConfirm) h+=renderReflectConfirm(); // 既存オーバーレイの上に確認モーダルを重ねる
   if(state.enterConfirm) h+=renderEnterConfirm();
   if(state.officeConfirm) h+=renderOfficeConfirm();
@@ -5252,6 +5425,9 @@ function render(){
     setTimeout(()=>{ const el=document.getElementById(id); if(el){ el.scrollIntoView({behavior:"smooth",block:"center"}); el.classList.add("pk-flash"); setTimeout(()=>el.classList.remove("pk-flash"),1600); } },60);
   }
 }
+// 手動登録した入出庫を localStorage から復元し、在庫派生のコスト書類を再連携
+loadInvUserMoves();
+if(INV_USER_MOVES.length) syncInvCostDocs();
 freezeReflectedLines();
 seedChangelog();
 // 連携アラートを localStorage から復元（無ければ初回連携でベースライン確立）
