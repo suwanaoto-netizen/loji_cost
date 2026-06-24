@@ -1899,7 +1899,7 @@ function invBuildUserMove(f){
   return {id:f.id||_invUserSeq++, itemId:it.id, cat:it.cat, office:it.office,
     komoku:c.komoku, costItem:it.costItem, unit:it.unit,
     type:f.type, ym, date:f.date, qty, unitPrice:up, amount:qty*up,
-    party, allocTo, note, userAdded:true};
+    party, allocTo, note, docId:f.docId||"", userAdded:true};
 }
 /* 1品目の在庫サマリー：現在庫・移動平均評価額・貸出中・直近入出庫 */
 function invStock(id){
@@ -4637,15 +4637,20 @@ function _invDefaultItemId(){ const f=_invFilteredItems(); return (f[0]||INV_ITE
 function openInvMoveNew(){
   const id=_invDefaultItemId(); const it=INV_ITEM[id];
   state.invMoveEdit={mode:"new", id:null, itemId:id, type:"in", date:INV_TODAY,
-    qty:"", unitPrice:it?it.price:"", party:"", allocTo:(it&&(it.cat==="fuel"||it.cat==="tire"))?"車両":"拠点", note:""};
+    qty:"", unitPrice:it?it.price:"", party:"", allocTo:(it&&(it.cat==="fuel"||it.cat==="tire"))?"車両":"拠点", note:"", docId:""};
   renderOverlay();
 }
+/* 書類から入庫を取込：入庫モードで開き、関連書類を選べる状態にする */
+function openInvMoveFromDoc(){ openInvMoveNew(); if(state.invMoveEdit){ state.invMoveEdit.type="in"; } renderOverlay(); }
 function openInvMoveEdit(mid){
   const m=INV_USER_MOVES.find(x=>x.id===+mid); if(!m){ toast("この履歴は手動登録分ではないため編集できません"); return; }
   state.invMoveEdit={mode:"edit", id:m.id, itemId:m.itemId, type:m.type, date:m.date,
-    qty:m.qty, unitPrice:m.unitPrice, party:m.party, allocTo:m.allocTo||"拠点", note:m.note||""};
+    qty:m.qty, unitPrice:m.unitPrice, party:m.party, allocTo:m.allocTo||"拠点", note:m.note||"", docId:m.docId||""};
   renderOverlay();
 }
+/* 入出庫に紐付け可能な書類（在庫派生・削除済みを除く） */
+function _invDocCandidates(){ return docs.filter(d=>!d.deleted && !d.invDerived); }
+function invMoveSetDoc(v){ const e=state.invMoveEdit; if(!e) return; e.docId=v; const d=docs.find(x=>x.id===v); if(d&&d.vendor) e.party=d.vendor; renderOverlay(); }
 function closeInvMove(){ state.invMoveEdit=null; renderOverlay(); }
 function invMoveField(k,v){ if(state.invMoveEdit) state.invMoveEdit[k]=v; }
 /* 区分・品目・配賦先が変わったら配賦先(party)を既定に戻して再描画 */
@@ -4746,6 +4751,9 @@ function renderInvMoveModal(){
       </div>
       ${allocSeg}
       ${partyCtl}
+      ${e.type==="in"?`<div class="fld"><label>関連書類（任意・仕入／納品書）</label>
+        <select class="in" onchange="invMoveSetDoc(this.value)"><option value="">（紐付けなし）</option>${_invDocCandidates().map(d=>`<option value="${esc(d.id)}" ${e.docId===d.id?"selected":""}>${esc(d.name)}${d.vendor?"／"+esc(d.vendor):""}</option>`).join("")}</select>
+        ${e.docId?`<div style="font-size:11px;color:var(--inkSoft);margin-top:4px;line-height:1.6">アップロード済みの書類を入庫の根拠として紐付けます。履歴から書類を開けます。</div>`:""}</div>`:""}
       <div class="fld"><label>摘要（任意）</label>
         <input class="in" value="${esc(e.note)}" oninput="invMoveField('note',this.value)" placeholder="${esc(invDefaultNote(it.cat,e.type))}"></div>
       <div class="inv-flow" style="margin:6px 0 0">${I.boxes("#0E5A40",15)} 金額 <b id="imv-amt" style="font-family:var(--mono)">${yen(p.amount)}</b>　<span class="ar">→</span> <b id="imv-link">${esc(p.link)}</b></div>
@@ -4879,6 +4887,7 @@ function renderInventory(){
     <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 品目区分</span><select onchange="setInvCat(this.value)"><option value="all" ${state.invCat==="all"?"selected":""}>すべて</option>${INV_CATS.map(c=>`<option value="${c.k}" ${state.invCat===c.k?"selected":""}>${esc(c.l)}</option>`).join("")}</select></div>
     <div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 保管拠点</span><select onchange="setInvOffice(this.value)"><option value="all" ${state.invOffice==="all"?"selected":""}>全拠点</option>${CATEGORIES.map(o=>`<option value="${esc(o)}" ${state.invOffice===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>
     <span class="sp"></span>
+    <button class="btn-green btn-sm" style="background:#2563EB" onclick="openInvMoveFromDoc()">${I.docs?I.docs("#fff",13):""} 書類から入庫</button>
     <button class="btn-green" onclick="openInvMoveNew()">${I.plus()} 入出庫を登録</button>
   </div>`;
   const body=tab==="log"?invLogView():tab==="moves"?invMovesView():invStockView();
@@ -5032,8 +5041,9 @@ function invMovesView(){
     if(m.note==="返却")return`<span class="inv-badge b-ret">返却</span>`;
     return`<span class="inv-badge b-in">入庫・仕入</span>`; };
   const partyCell=m=>{
-    if(m.allocTo==="車両"&&officeFromPlate(m.party)) return `<button class="inv-link" onclick="setVehTab('individual')">${esc(m.party)}</button>`;
-    return esc(m.party); };
+    let s=(m.allocTo==="車両"&&officeFromPlate(m.party))?`<button class="inv-link" onclick="setVehTab('individual')">${esc(m.party)}</button>`:esc(m.party);
+    if(m.docId && docs.find(d=>d.id===m.docId&&!d.deleted)) s+=` <button class="inv-link" onclick="openPanel('${esc(m.docId)}')">${I.docs?I.docs("#177D58",12):""} 書類</button>`;
+    return s; };
   const costCell=m=>{ if(!invIsCost(m)) return `<span style="color:var(--inkFaint)">—</span>`;
     if(m.allocTo==="車両"&&INV_VEH_COST[m.costItem]) return `<button class="inv-link" onclick="setVehTab('individual')">車両コストへ計上</button> <span style="color:var(--inkSoft);font-size:10.5px">${esc(INV_VEH_COST[m.costItem].cat)}</span>`;
     return `<button class="inv-link" onclick="setVehTab('sites')">拠点コストへ計上</button> <span style="color:var(--inkSoft);font-size:10.5px">${esc(m.komoku)}</span>`; };
