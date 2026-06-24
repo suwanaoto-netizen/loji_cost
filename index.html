@@ -1081,6 +1081,7 @@
   .seg button+button{border-left:1px solid var(--lineSoft)}
   .seg button:hover{background:var(--panel);color:var(--ink)}
   .seg button.on{background:var(--greenSoft);color:var(--greenDark)}
+  .inv-reflect-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#FBF3E2;border:1px solid #EBD9B0;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#7A5A12}
   .inv-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .inv-bar .sp{flex:1}
   .inv-scroll{flex:1;min-height:0;overflow-y:auto;padding-bottom:8px}
@@ -2000,6 +2001,34 @@ function syncInvCostDocs(){
   // 現在の在庫から再生成して push（連携済みとして明細を凍結）
   buildInvCostDocs().forEach(d=>{ pushDoc(d); const last=docs[docs.length-1]; if(last) freezeLinesOf(last.id); });
 }
+/* 在庫を変更したら：在庫照会は即時更新（_INV破棄）。コスト連携は autoReflect=ON なら即時、
+   そうでなければ「未反映」とし、確認ボタン（reflectInvToCost）で明示的に反映する。 */
+function markInvDirty(){
+  invalidateInventory();
+  if(state.settings && state.settings.autoReflect){ syncInvCostDocs(); state.invPendingReflect=false; state.invPendingCount=0; }
+  else { state.invPendingReflect=true; state.invPendingCount=(state.invPendingCount||0)+1; }
+}
+function askReflectInv(){ state.invReflectConfirm=true; renderOverlay(); }
+function cancelReflectInv(){ state.invReflectConfirm=false; renderOverlay(); }
+function reflectInvToCost(){
+  syncInvCostDocs();
+  state.invPendingReflect=false; state.invPendingCount=0; state.invReflectConfirm=false;
+  render();
+  toast("在庫の変更を拠点／車両コストへ反映しました");
+}
+function renderInvReflectConfirm(){
+  return `<div class="ovl anim" style="z-index:80" onclick="if(event.target===this)cancelReflectInv()"><div class="modal" style="width:min(480px,100%)">
+    <div class="m-head"><span class="t">コストへ反映</span><button class="x" onclick="cancelReflectInv()">${I.x("#5A6472",18)}</button></div>
+    <div class="m-body">
+      <p style="font-size:13.5px;line-height:1.8;margin:0 0 8px">未反映の在庫変更 <b>${state.invPendingCount}</b> 件を、<b>出庫＝原価計上</b>として拠点コスト／車両コストへ反映します。</p>
+      <p style="font-size:12px;color:var(--inkSoft);line-height:1.7;margin:0">在庫由来のコスト書類（在庫消費_拠点計上／在庫配賦_車両別）を最新の入出庫から作り直し、「連携済み」として計上します。</p>
+    </div>
+    <div class="m-foot">
+      <button class="btn-cancel" onclick="cancelReflectInv()">キャンセル</button>
+      <button class="btn-green" onclick="reflectInvToCost()">${I.check("#fff",14,3)} 反映する</button>
+    </div>
+  </div></div>`;
+}
 /* 異常検知・買い替えサインのデモ用：明確なスパイク／右肩上がりを仕込む */
 function anomalyDemoDocs(){
   const out=[];
@@ -2108,6 +2137,7 @@ let state={
   statusSel:[],   // 選択中のステータス（複数可・空＝すべて）
   categoryFilter:"all", vehCategoryFilter:"all", vehTab:"monitor",
   invTab:"stock", invCat:"all", invOffice:"all", invMoveEdit:null, invItemEdit:null,
+  invPendingReflect:false, invPendingCount:0, invReflectConfirm:false,
   chartOffice:"all", chart2Cat:"燃料費", chart2Klass:"all",
   trash:false, docTrashAction:null,
   q:"",
@@ -4629,17 +4659,18 @@ function saveInvMove(){
   const mv=invBuildUserMove(e); if(!mv){ toast("登録に失敗しました"); return; }
   if(e.mode==="edit"){ const i=INV_USER_MOVES.findIndex(x=>x.id===e.id); if(i>=0){ mv.id=e.id; INV_USER_MOVES[i]=mv; } else INV_USER_MOVES.push(mv); }
   else INV_USER_MOVES.push(mv);
-  syncInvCostDocs(); saveInvUserMoves();
+  markInvDirty(); saveInvUserMoves();
   state.invMoveEdit=null; render();
-  toast(e.mode==="new"?"入出庫を登録し、コストへ連携しました":"入出庫を更新し、コストへ再連携しました");
+  const auto=state.settings&&state.settings.autoReflect;
+  toast(e.mode==="new"?(auto?"入出庫を登録し、コストへ連携しました":"入出庫を登録しました（コスト未反映）"):(auto?"入出庫を更新し、コストへ再連携しました":"入出庫を更新しました（コスト未反映）"));
 }
 function deleteInvMove(){
   const e=state.invMoveEdit; if(!e||e.mode!=="edit") return;
   const i=INV_USER_MOVES.findIndex(x=>x.id===e.id);
   if(i>=0) INV_USER_MOVES.splice(i,1);
-  syncInvCostDocs(); saveInvUserMoves();
+  markInvDirty(); saveInvUserMoves();
   state.invMoveEdit=null; render();
-  toast("入出庫を削除し、コストへ再連携しました");
+  toast(state.settings&&state.settings.autoReflect?"入出庫を削除し、コストへ再連携しました":"入出庫を削除しました（コスト未反映）");
 }
 /* localStorage 永続化（手動登録分のみ。リロードしても連携状態を保持） */
 const INV_LS_KEY="loji_inv_user_moves_v1";
@@ -4759,9 +4790,10 @@ function saveInvItem(){
       if(e.isUser){ const u=INV_USER_ITEMS.find(x=>x.id===e.id); if(u) Object.assign(u,f); }
       else { INV_ITEM_EDITS[e.id]=Object.assign(INV_ITEM_EDITS[e.id]||{}, f); } }
   }
-  rebuildInvItem(); invalidateInventory(); syncInvCostDocs(); saveInvItems();
+  rebuildInvItem(); markInvDirty(); saveInvItems();
   state.invItemEdit=null; render();
-  toast(e.mode==="new"?"品目を追加しました":"品目を更新し、コストへ再連携しました");
+  const auto=state.settings&&state.settings.autoReflect;
+  toast(e.mode==="new"?"品目を追加しました":(auto?"品目を更新し、コストへ再連携しました":"品目を更新しました（コスト未反映）"));
 }
 function deleteInvItem(){
   const e=state.invItemEdit; if(!e||e.mode!=="edit") return;
@@ -4769,7 +4801,7 @@ function deleteInvItem(){
   const i=INV_ITEMS.findIndex(x=>x.id===e.id); if(i>=0) INV_ITEMS.splice(i,1);
   const j=INV_USER_ITEMS.findIndex(x=>x.id===e.id); if(j>=0) INV_USER_ITEMS.splice(j,1);
   for(let k=INV_USER_MOVES.length-1;k>=0;k--){ if(INV_USER_MOVES[k].itemId===e.id) INV_USER_MOVES.splice(k,1); }
-  rebuildInvItem(); invalidateInventory(); syncInvCostDocs(); saveInvItems(); saveInvUserMoves();
+  rebuildInvItem(); markInvDirty(); saveInvItems(); saveInvUserMoves();
   state.invItemEdit=null; render();
   toast("品目を削除しました");
 }
@@ -4828,7 +4860,11 @@ function renderInventory(){
     <button class="btn-green" onclick="openInvMoveNew()">${I.plus()} 入出庫を登録</button>
   </div>`;
   const body=tab==="moves"?invMovesView():invStockView();
-  return head+seg+`<div class="inv-scroll">${body}</div>`;
+  const reflectBar=state.invPendingReflect?`<div class="inv-reflect-bar">${I.alert("#B87514",16)}
+    <span>未反映の在庫変更が <b>${state.invPendingCount}</b> 件あります。出庫＝原価計上を拠点／車両コストへ反映します。</span>
+    <span style="flex:1"></span>
+    <button class="btn-green btn-sm" onclick="askReflectInv()">${I.check?I.check("#fff",13,3):""} コストへ反映</button></div>`:"";
+  return head+seg+reflectBar+`<div class="inv-scroll">${body}</div>`;
 }
 function invFlowNote(){
   return `<div class="inv-flow">${I.boxes("#0E5A40",15)} <b>拠点で在庫保有</b> <span class="ar">→</span> 出庫＝原価計上。<b>燃料・タイヤの車両配賦分</b>は <button class="inv-link" onclick="setVehTab('individual')">車両コスト</button> へ、<b>拠点共通・取付・荷役機材</b>は <button class="inv-link" onclick="setVehTab('sites')">拠点コスト</button> へ自動連携します。</div>`;
@@ -5478,6 +5514,7 @@ function renderOverlay(){
   else if(state.costCsv) h=renderCostCsvModal();
   else if(state.invMoveEdit) h=renderInvMoveModal();
   else if(state.invItemEdit) h=renderInvItemModal();
+  if(state.invReflectConfirm) h+=renderInvReflectConfirm();
   if(state.reflectConfirm) h+=renderReflectConfirm(); // 既存オーバーレイの上に確認モーダルを重ねる
   if(state.enterConfirm) h+=renderEnterConfirm();
   if(state.officeConfirm) h+=renderOfficeConfirm();
