@@ -3066,7 +3066,6 @@ function renderPanel(){
           <div id="pn-bunrui-${l.lid}" class="bunrui-wrap">${bunruiBadge(l)}</div></div>
         <div class="fld"><label>発生日</label><input class="in mono" ${ro} value="${esc(l.inspectedAt)}" oninput="pnLine(${l.lid},'inspectedAt',this.value)"></div>
       </div>
-      <div id="pn-subcat-wrap-${l.lid}">${subcatFieldHTML(l)}</div>
       <div id="pn-fuel-wrap-${l.lid}">${fuelFieldsHTML(l)}</div>
       <div class="grid2">
         ${targetFld}
@@ -3189,10 +3188,8 @@ function pnLine(lid,field,val){
   }
   else l[field]=val;
   if(field==="item"||field==="cat"||field==="komoku"){
-    // 内訳（連携用）は cat+item の従属値。項目名・分類を直すと判定ルールに従い再判定し、
-    // 読み取り専用表示をその場で更新する（直接編集は不可）。
+    // 内訳（連携用）は表示しないが、連携の従属値として cat+item から内部的に再判定して保持する。
     const sc=resolveSubcat(l.cat,l.item); if(sc) l.subCat=sc; else delete l.subCat;
-    const w=document.getElementById("pn-subcat-wrap-"+lid); if(w) w.innerHTML=subcatFieldHTML(l);
     // 燃料費に変更/解除したら給油量・単価フィールドを出し入れする
     const fw=document.getElementById("pn-fuel-wrap-"+lid); if(fw) fw.innerHTML=fuelFieldsHTML(l);
   }
