@@ -3045,8 +3045,6 @@ function renderPanel(){
     </div>
   </div>`;
 
-  const exp=expectedDocTypes(d);
-  const expHint=exp.length?`<span class="exp-hint">想定：${exp.map(esc).join("・")}</span>`:"";
   const fields=`
     <div class="pn-sec">書類情報</div>
     <div class="fld"><label>書類名</label><input class="in" value="${esc(d.name)}" readonly></div>
@@ -3055,8 +3053,6 @@ function renderPanel(){
         <select class="in" ${isReflected?"disabled":""} onchange="pnDoc('category',this.value)">${[""].concat(CATEGORIES.includes(d.category)||!d.category?CATEGORIES:[d.category].concat(CATEGORIES)).filter((x,i,a)=>a.indexOf(x)===i).map(c=>`<option value="${esc(c)}" ${c===(d.category||"")?"selected":""}>${c===""?"（未選択）":esc(c)}</option>`).join("")}</select></div>
       <div class="fld"><label>取引先</label><input class="in" ${isReflected?"readonly":""} value="${esc(d.vendor)}" oninput="pnVendor(this.value)"></div>
     </div>
-    <div class="fld"><label>書類タイプ（記載書類）${expHint}</label>
-      ${docTypeSelectHTML(d,isReflected)}</div>
     <div class="total-box"><span class="lab">書類合計（明細 ${d.lines.length}件）</span><span class="v" id="pn-total">${yen(total)}</span></div>`;
 
   const legend=`<div class="legend">右の書類の読み取り箇所と対応：
