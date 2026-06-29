@@ -433,6 +433,10 @@
   .read-hint{display:flex;align-items:flex-start;gap:5px;margin-top:5px;font-size:10.5px;line-height:1.45;color:#0E5A40;background:rgba(23,125,88,.08);border:1px solid rgba(23,125,88,.22);border-radius:6px;padding:4px 7px}
   .read-hint svg{flex-shrink:0;margin-top:1px}
   .read-hint b{font-weight:800}
+  /* 原価項目：参考値（自動判定・変更不可）。点線枠＋淡色背景で非編集を明示 */
+  .komoku-ref{display:flex;align-items:center;gap:8px;min-height:36px;box-sizing:border-box;padding:7px 10px;border:1px dashed var(--line);border-radius:8px;background:#F7F8F5;font-size:12.5px;font-weight:700;color:var(--ink)}
+  .komoku-ref .kr-empty{color:var(--inkFaint);font-weight:600}
+  .komoku-ref .kr-tag{margin-left:auto;flex-shrink:0;font-size:10px;font-weight:800;color:var(--inkSoft);background:#EAEDF0;border-radius:999px;padding:2px 8px}
   .in.b-r{border-color:#B23A2E!important;border-width:1.5px}
   .in.b-b{border-color:#2563EB!important;border-width:1.5px}
 
@@ -591,9 +595,9 @@
   .vt-metrics tbody tr.vrow:hover td.sticky-c{background:#F6FBF8}
   .vt-metrics .sticky-c1{left:0;width:142px;min-width:142px;max-width:142px}
   .vt-metrics .sticky-c2{left:142px;width:116px;min-width:116px;max-width:116px}
-  .vt-metrics .sticky-c3{left:258px;width:124px;min-width:124px;max-width:124px;box-shadow:1px 0 0 var(--line)}
+  .vt-metrics .sticky-c3{left:258px;width:166px;min-width:166px;max-width:166px;box-shadow:1px 0 0 var(--line)}
   /* 操作列：ボタンがスクロール境界線に被らないよう左寄せ・余白縮小・アイコンボタン小型化 */
-  .vt-metrics td.sticky-c3,.vt-metrics thead th.sticky-c3{text-align:left;padding-left:12px;padding-right:8px}
+  .vt-metrics td.sticky-c3,.vt-metrics thead th.sticky-c3{text-align:left;padding-left:12px;padding-right:10px}
   .vt-metrics td.sticky-c3 .veh-edit-btn{padding:5px 10px}
   .vt-metrics td.sticky-c3 .icon-btn{width:26px;height:26px;border-radius:7px}
   .vt-metrics .sticky-c-end{box-shadow:1px 0 0 var(--line)}
@@ -633,8 +637,6 @@
   .modal-wide{width:min(860px,100%)}
   .modal-docs{width:min(1080px,97vw)}
   .modal-docs .dt tbody tr{cursor:pointer}
-  .panel-vehdoc{width:min(1180px,97vw)}
-  .panel-vehdoc .pn-left{width:54%}
   .veh-edit-body{padding:18px 20px}
   .ve-meta{display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap}
   .ve-sum{font-size:12.5px;color:var(--inkSoft)}
@@ -2130,7 +2132,7 @@ let state={
   vehExpanded:new Set(),
   vehEditKey:null, vehEditMeta:null, vehEditConfirm:false, vehEditSnapshot:null, vehViewDocId:null, vehViewLid:null,
   vehDocsKey:null, vehDocsMeta:null, vehDocsKomoku:"all", vehDocsStart:null, vehDocsEnd:null, vehDocsPage:1, vehDocsPerPage:20,
-  vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, vehDocPanelDocId:null,
+  vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, panelCtx:null,
   vehPanel:null, vehChartCat:null, vehChartGran:"month", vehTlExpanded:false,
   vehTrash:new Set(), vehTrashView:false, vehTrashAction:null,
   changelogOpen:false, changelogSeenCount:0, vehEditHighlight:null,
@@ -2910,7 +2912,7 @@ function openPanel(id){
   state.aiConfirm = null;
   renderOverlay();
 }
-function closePanel(){state.panelId=null;state.draft=null;state.pvOriginal=null;state.pnDeleteLid=null;state.aiConfirm=null;renderOverlay();}
+function closePanel(){state.panelId=null;state.draft=null;state.pvOriginal=null;state.pnDeleteLid=null;state.aiConfirm=null;state.panelCtx=null;renderOverlay();}
 
 /* ───── 明細確認ステップ（書類を開いた直後／AI読み取り明細の選択・反映） ───── */
 function aiSparkle(){return `<svg width="16" height="16" viewBox="0 0 24 24" fill="#177D58" aria-hidden="true"><path d="M12 2l1.7 5.1a3 3 0 0 0 1.9 1.9L20.7 11l-5.1 1.7a3 3 0 0 0-1.9 1.9L12 19.7l-1.7-5.1a3 3 0 0 0-1.9-1.9L3.3 11l5.1-1.7a3 3 0 0 0 1.9-1.9z"/></svg>`;}
@@ -2988,7 +2990,8 @@ function aiReflect(){
   toast(`${kept.length}件の明細を反映しました`);
 }
 function panelNav(delta){
-  const list=visibleDocs();
+  const fromVeh=state.panelCtx==="vehdocs";
+  const list=fromVeh?panelDocList():visibleDocs();
   const idx=list.findIndex(d=>d.id===state.panelId);
   if(idx<0) return;
   const ni=idx+delta; if(ni<0||ni>=list.length) return;
@@ -2996,13 +2999,15 @@ function panelNav(delta){
   state.panelId=d.id; state.draft=Object.assign(JSON.parse(JSON.stringify(d)),{lines:JSON.parse(JSON.stringify(linesOf(d.id)))}); state.draft._ocr=ocrAmountCandidates(state.draft.lines); state.pvOriginal=JSON.parse(JSON.stringify(state.draft)); state.pvZoom=100; state.panelJustOpened=false; state.pnDeleteLid=null;
   // AI明細確認ステップは廃止。遷移先の書類も直接、明細フォームを表示する
   state.aiConfirm = null;
-  state.docPage=Math.floor(ni/state.docPerPage)+1; // 背面の一覧ページも同期
+  if(fromVeh) state.vehDocsPage=Math.floor(ni/state.vehDocsPerPage)+1; // 背面の内訳一覧ページを同期
+  else state.docPage=Math.floor(ni/state.docPerPage)+1; // 背面の一覧ページも同期
   render();
 }
 function renderPanel(){
   const d=state.draft; if(!d)return"";
   const total=docTotal(d);
-  const isReflected=d.status==="連携済み";
+  const fromVeh=state.panelCtx==="vehdocs"; // 内訳（コストモニター）から開いた＝連携済みでも編集可
+  const isReflected=d.status==="連携済み" && !fromVeh;
   const confirmMode=!!state.aiConfirm; // 左ペインを明細確認UIにするか
   const st=d.status; // 未入力 / 入力済み / 連携済み
   const s2 = st==="未入力" ? "current" : "done";        // 内容を保存
@@ -3014,10 +3019,12 @@ function renderPanel(){
     <div class="sline ${st!=="未入力"?"done":""}"></div>
     <div class="step ${s3}"><span class="sdot">${s3==="done"?I.check("#fff",11,3):"3"}</span><span class="slab">データ連携</span></div>
   </div>`;
-  const _nl=visibleDocs(); const _ni=_nl.findIndex(x=>x.id===state.panelId);
+  const _nl=fromVeh?panelDocList():visibleDocs(); const _ni=_nl.findIndex(x=>x.id===state.panelId);
   const hasPrev=_ni>0, hasNext=_ni>=0&&_ni<_nl.length-1;
   const navPos=_ni>=0?`<span class="pn-navpos">${_ni+1} / ${_nl.length}</span>`:"";
+  const vehPlate=fromVeh&&state.vehDocsMeta?`<span class="plate" style="margin-right:4px">${esc(state.vehDocsMeta.target)}</span>`:"";
   const head=`<div class="pn-head">
+    ${vehPlate}
     <div class="pn-no">No. <b>${d.no}</b></div>
     ${statusChip(d.status)}
     <div class="pn-nav">
@@ -3028,6 +3035,8 @@ function renderPanel(){
     <div class="pn-actions">
       ${confirmMode
         ? `<span class="reflect-hint">${I.alert("#B87514",12)} 明細を確認し「反映」してください</span>`
+        : fromVeh
+        ? `<button class="btn-green" onclick="vehDocCompleteSave()">${I.check("#fff",14,3)} 完了</button>`
         : `${st==="未入力"?`<span class="reflect-hint">${I.alert("#B87514",12)} 入力済みにすると連携ボタンが押下できます</span>`:""}
       ${isReflected?"":`<button class="btn-ghost" onclick="savePanel()">${I.check("#5A6472",14,2.6)} 入力済み</button>`}
       ${isReflected?`<span class="badge" style="color:var(--greenDark);background:var(--greenSoft)">${I.check("#0E5A40",12,2.6)}連携済み（${d.reflectedAt||""}）</span>`
@@ -3065,10 +3074,10 @@ function renderPanel(){
       <div class="lc-head"><span class="lc-no">明細 ${idx+1}</span>
         <span class="match-badge" id="pn-badge-${l.lid}">${matchBadge(l)}</span>
         ${isReflected?"":`<button class="lc-del" title="この明細を削除" onclick="pnAskDeleteLine(${l.lid})">${I.x("#B23A2E",15)}</button>`}</div>
-      <div class="fld" id="pn-item-wrap-${l.lid}"><label>項目（現場がわかる表現から選択）</label>${genbaSelectHTML(l.lid,l,isReflected)}${readHintHTML(l)}</div>
+      <div class="fld" id="pn-item-wrap-${l.lid}"><label>項目（OCR判定対象・部分一致で候補を上位表示）</label>${genbaSelectHTML(l.lid,l,isReflected)}${readHintHTML(l)}</div>
       <div class="grid2">
-        <div class="fld"><label>原価項目（原価分類） ${catHelp()}</label>
-          ${komokuSelectHTML(l.lid,l,isReflected)}
+        <div class="fld"><label>原価項目（自動判定・参考値） ${catHelp()}</label>
+          ${komokuRefHTML(l)}
           <div id="pn-bunrui-${l.lid}" class="bunrui-wrap">${bunruiBadge(l)}</div></div>
         <div class="fld"><label>発生日</label><input class="in mono" ${ro} value="${esc(l.inspectedAt)}" oninput="pnLine(${l.lid},'inspectedAt',this.value)"></div>
       </div>
@@ -3146,9 +3155,8 @@ function buildPreview(d, pageIdx){
     ${sumBlock}
   </div>`;
 }
-function refreshPreview(){const src=state.pvOriginal||state.draft||(state.vehDocPanelDocId?docs.find(x=>x.id===state.vehDocPanelDocId):null); if(!src)return;
-  const w=document.getElementById("pv-page-wrap");if(w)w.innerHTML=buildPreview(src);  const z=document.getElementById("pv-zoom");if(z)z.textContent=state.pvZoom+"%";
-  const t=document.getElementById("pn-total");if(t&&state.draft)t.textContent=yen(docTotal(state.draft));}
+function refreshPreview(){const w=document.getElementById("pv-page-wrap");if(w)w.innerHTML=buildPreview(state.pvOriginal||state.draft);  const z=document.getElementById("pv-zoom");if(z)z.textContent=state.pvZoom+"%";
+  const t=document.getElementById("pn-total");if(t)t.textContent=yen(docTotal(state.draft));}
 function pvZoom(dz){state.pvZoom=Math.max(50,Math.min(200,state.pvZoom+dz));refreshPreview();}
 function downloadOriginal(docId){
   const d=docs.find(x=>x.id===docId)||state.draft; if(!d)return;
@@ -3182,8 +3190,16 @@ function pnLine(lid,field,val){
     const ck=document.getElementById("pn-amtck-"+lid); if(ck) ck.style.display=(state.draft._ocr||[]).includes(l.amount)?"":"none";}
   else if(field==="liters"||field==="unitPrice"){ const s=String(val).replace(/[^0-9.]/g,""); l[field]=s===""?null:parseFloat(s); }
   else if(field==="meisai"){
-    // 項目（現場表現）を選択：裏でC明細（label）に紐づけて保存。コスト管理の各項目（C列）へ反映される。
+    // 項目（OCR判定対象）を選択：裏でC明細（label）に紐づけて保存。
+    // 原価項目（komoku）・コスト分類（cat）は項目から自動判定（参考値）し、表示を更新する。
     l.meisai=val||"";
+    const e=MEISAI_INDEX[val];
+    if(e){ l.komoku=e.komoku; const idx=KOMOKU_INDEX[e.komoku]; if(idx) l.cat=idx.legacyCat; }
+    const kr=document.getElementById("pn-komoku-"+lid); if(kr) kr.innerHTML=komokuRefInner(l)+`<span class="kr-tag">参考</span>`;
+    const bw=document.getElementById("pn-bunrui-"+lid); if(bw) bw.innerHTML=bunruiBadge(l);
+    const sc=resolveSubcat(l.cat,l.item); if(sc) l.subCat=sc; else delete l.subCat;
+    const fw=document.getElementById("pn-fuel-wrap-"+lid); if(fw) fw.innerHTML=fuelFieldsHTML(l);
+    refreshPreview(); return;
   }
   else if(field==="komoku"){
     // 原価項目を選択：原価項目を保存し、既存集計用の legacyCat（コスト分類）へ自動変換する
@@ -3209,19 +3225,38 @@ function komokuOptions(cur){
   const opts=order.map(k=>`<optgroup label="${esc(k)}">`+groups[k].map(km=>`<option value="${esc(km)}" ${km===cur?"selected":""}>${esc(km)}</option>`).join("")+`</optgroup>`).join("");
   return `<option value="" ${cur?"":"selected"}>（未分類）</option>${opts}`;
 }
-/* 原価項目セレクト（書類明細の編集パネル用） */
-function komokuSelectHTML(lid,l,disabled){
-  return `<select class="in" ${disabled?"disabled":""} onchange="pnLine(${lid},'komoku',this.value)">${komokuOptions(lineKomoku(l))}</select>`;
+/* 原価項目（参考値・変更不可）：選択した項目から自動判定して表示する。
+   原価項目は項目に従属するため、ここでは編集できず参考表示のみ。 */
+function komokuRefInner(l){
+  const km=lineKomoku(l);
+  return km?`<span class="kr-v">${esc(km)}</span>`:`<span class="kr-empty">項目を選ぶと自動判定されます</span>`;
 }
-/* 項目セレクト：現場がわかる表現（F列）を選択肢に、値は裏でC明細（label）に紐づく。
-   選択肢は当該明細の原価項目（komoku）配下の明細に絞り込む。 */
+function komokuRefHTML(l){
+  return `<div class="komoku-ref" id="pn-komoku-${l.lid}" title="原価項目は項目から自動判定される参考値です（直接編集はできません）">${komokuRefInner(l)}<span class="kr-tag">参考</span></div>`;
+}
+/* OCR読み取りテキストに対する項目候補のスコア。完全一致＝最優先、記載文言(kisai)の最長一致＝具体的なほど高優先、未一致＝0。 */
+function itemMatchScore(text,e){
+  const t=String(text||""); if(!t) return 0;
+  if(e.label===t||e.genba===t) return 1000;
+  let best=0; (e.kisai||[]).forEach(k=>{ if(k&&t.indexOf(k)>=0&&k.length>best) best=k.length; }); return best;
+}
+/* 項目セレクト（OCR判定対象）：記載文言に部分一致する候補を優先度の高い順に上位表示し、
+   続けて全項目を原価項目（scope｜komoku）でグルーピングして選択可能にする。
+   値＝C明細(label)、表示＝現場表現(genba)。選択した項目から原価項目が自動的に決まる。 */
 function genbaSelectHTML(lid,l,disabled){
-  const km=lineKomoku(l); const items=KOMOKU_ITEMS[km]||[];
-  const cur=lineMeisai(l); let inList=false;
-  const opts=items.map(it=>{ if(it.label===cur)inList=true; return `<option value="${esc(it.label)}" ${it.label===cur?"selected":""}>${esc(it.genba||it.label)}</option>`; }).join("");
-  const head=(cur&&!inList)?`<option value="${esc(cur)}" selected>${esc(genbaOf(cur))}</option>`:"";
+  const cur=lineMeisai(l);
+  const text=(l&&l.item||"").trim();
+  const scored=CROSS_REF.map((e,i)=>({e,s:itemMatchScore(text,e),i}));
+  const matched=scored.filter(x=>x.s>0).sort((a,b)=>b.s-a.s||a.i-b.i);
+  const curInMatched=matched.some(x=>x.e.label===cur);
   const none=`<option value="" ${cur?"":"selected"}>（未選択）</option>`;
-  return `<select class="in b-g" ${disabled?"disabled":""} onchange="pnLine(${lid},'meisai',this.value)">${head}${none}${opts}</select>`;
+  const candHtml=matched.length
+    ? `<optgroup label="🔎 読み取り候補（部分一致・優先順）">`+matched.map(x=>`<option value="${esc(x.e.label)}" ${x.e.label===cur?"selected":""}>${esc(x.e.genba)}</option>`).join("")+`</optgroup>`
+    : "";
+  const groups={},order=[];
+  CROSS_REF.forEach(e=>{ const k=e.scope+"｜"+e.komoku; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(e); });
+  const fullHtml=order.map(k=>`<optgroup label="${esc(k)}">`+groups[k].map(e=>`<option value="${esc(e.label)}" ${(!curInMatched&&e.label===cur)?"selected":""}>${esc(e.genba)}</option>`).join("")+`</optgroup>`).join("");
+  return `<select class="in b-g" ${disabled?"disabled":""} onchange="pnLine(${lid},'meisai',this.value)">${none}${candHtml}${fullHtml}</select>`;
 }
 /* AI読み取りヒント：書類の記載（G列）を読み取り、項目（F列）を自動入力したことを示す */
 function readHintHTML(l){
@@ -3771,7 +3806,7 @@ function openVehDocs(key,kind,target){
   state.vehDocsKey=key; state.vehDocsMeta={key,kind,target};
   state.vehDocsKomoku="all";
   const r=vehDocsDefaultRange(); state.vehDocsStart=r.start; state.vehDocsEnd=r.end;
-  state.vehDocsPage=1; state.vehDocsCalOpen=false; state.vehDocPanelDocId=null;
+  state.vehDocsPage=1; state.vehDocsCalOpen=false;
   const v=buildVehicles("all").find(x=>x.key===key);
   state.vehDocsSnapshot = v ? v.lines.filter(l=>l.src==="doc").map(l=>({lid:String(l.lid),docId:l.docId,item:l.item,komoku:lineKomoku(l),date:l.date,amount:+l.amount})) : [];
   renderOverlay();
@@ -3960,74 +3995,28 @@ function vehDocsPager(info){
       <button class="pg-btn" ${info.page>=info.pages?"disabled":""} onclick="setVehDocsPage(${info.page+1})">次へ ›</button>
     </div></div>`;
 }
-/* ───── 内訳：書類ごとの右サイドパネル（当該車両明細を override 編集） ───── */
-function openVehDocPanel(docId){ state.vehDocPanelDocId=docId; state.vehDocsCalOpen=false; state.pvZoom=100; renderOverlay(); }
-function closeVehDocPanel(){ state.vehDocPanelDocId=null; renderOverlay(); }
-function vehDocPanelNav(delta){
-  const list=vehDocsList(); const ids=list.map(x=>x.d.id);
-  const idx=ids.indexOf(state.vehDocPanelDocId); if(idx<0) return;
-  const ni=idx+delta; if(ni<0||ni>=ids.length) return;
-  state.vehDocPanelDocId=ids[ni]; state.pvZoom=100;
-  state.vehDocsPage=Math.floor(ni/state.vehDocsPerPage)+1; // 背面の一覧も同期
-  renderOverlay();
+/* ───── 内訳：書類ごとの右サイドパネル ─────
+   書類一覧と同一の右サイドパネル（renderPanel）を再利用する。内訳（コストモニター）から
+   開いた場合は state.panelCtx="vehdocs" を立て、連携済み書類でも編集可能にし、前へ／次へは
+   この車両の絞り込み済み書類一覧を辿る。「完了」で明細を保存して一覧へ戻る。 */
+function openVehDocPanel(docId){ state.panelCtx="vehdocs"; state.vehDocsCalOpen=false; openPanel(docId); }
+/* 内訳パネルで開いている書類一覧（前へ／次へ・保存後の戻り先の母集合） */
+function panelDocList(){
+  if(state.panelCtx==="vehdocs" && state.vehDocsKey) return vehDocsList().map(x=>x.d);
+  return visibleDocs();
 }
-function renderVehDocPanel(){
-  const docId=state.vehDocPanelDocId; if(!docId) return "";
-  const d=docs.find(x=>x.id===docId); if(!d) return "";
-  const m=state.vehDocsMeta||{};
-  const v=buildVehicles("all").find(x=>x.key===m.key);
-  const lines=v?v.lines.filter(l=>l.src==="doc"&&l.docId===docId):[];
-  const list=vehDocsList(); const ids=list.map(x=>x.d.id); const pos=ids.indexOf(docId);
-  const hasPrev=pos>0, hasNext=pos>=0&&pos<ids.length-1;
-  const navPos=pos>=0?`<span class="pn-navpos">${pos+1} / ${ids.length}</span>`:"";
-  const titlePlate=`<span class="plate" style="margin-right:6px">${esc(m.target)}</span>`;
-  const total=lines.reduce((s,l)=>s+(+l.amount||0),0);
-  const head=`<div class="pn-head">
-    ${titlePlate}
-    <div class="pn-no">No. <b>${d.no}</b></div>
-    ${statusChip(d.status)}
-    <div class="pn-nav">
-      <button class="pn-navbtn" ${hasPrev?"":"disabled"} title="前の書類" onclick="vehDocPanelNav(-1)"><span class="ic-l">${I.chev("#5A6472",13)}</span>前へ</button>
-      ${navPos}
-      <button class="pn-navbtn" ${hasNext?"":"disabled"} title="次の書類" onclick="vehDocPanelNav(1)">次へ<span class="ic-r">${I.chev("#5A6472",13)}</span></button>
-    </div>
-    <div class="pn-actions">
-      <button class="btn-green" onclick="closeVehDocPanel()">${I.check("#fff",14,3)} 完了</button>
-      <button class="icon-btn" style="border-color:var(--line)" title="閉じる" onclick="closeVehDocPanel()">${I.x("#5A6472",16)}</button>
-    </div>
-  </div>`;
-  const rows=lines.slice().sort((a,b)=>a.date<b.date?1:-1).map(x=>{
-    const onEdit=`vehEditDocLine('${x.docId}',${x.lid}`;
-    return `<tr>
-      <td style="width:116px"><input class="vd-in mono" value="${esc(x.date)}" onchange="${onEdit},'date',this.value)"></td>
-      <td style="min-width:120px"><input class="vd-in" value="${esc(x.item)}" onchange="${onEdit},'item',this.value)"></td>
-      <td style="width:150px"><select class="vd-in" onchange="${onEdit},'komoku',this.value)">${komokuOptions(lineKomoku(x))}</select></td>
-      <td style="width:100px"><input class="vd-in mono ta-r" value="${(+x.amount)}" onchange="${onEdit},'amount',this.value)"></td>
-    </tr>`;
-  }).join("");
-  const tbl=`<table class="vd-tbl"><thead><tr><th style="white-space:nowrap">発生日</th><th>項目</th><th style="white-space:nowrap">原価項目</th><th style="text-align:right">金額</th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="4" style="text-align:center;color:var(--inkSoft);padding:16px">この期間・原価項目に該当する明細がありません。</td></tr>'}</tbody></table>`;
-  const left=`<div class="pn-left">
-    <div class="pn-sec">書類情報</div>
-    <div class="fld"><label>書類名</label><input class="in" value="${esc(d.name)}" readonly></div>
-    <div class="grid2">
-      <div class="fld"><label>営業所</label><input class="in" value="${esc(d.category||"未分類")}" readonly></div>
-      <div class="fld"><label>取引先</label><input class="in" value="${esc(d.vendor)}" readonly></div>
-    </div>
-    <div class="total-box"><span class="lab">この車両分の合計（明細 ${lines.length}件）</span><span class="v">${yen(total)}</span></div>
-    <div class="pn-sec">${esc(m.target)} の明細 <span class="ct">${lines.length}件</span></div>
-    <div class="vd-sub" style="margin:0 2px 10px">行を直接編集できます。連携済み明細の変更は調整として記録され、コスト集計に即時反映されます（請求書原本は変更されません）。</div>
-    ${tbl}
-    <div class="pn-foot-note">${I.db("#B87514",16)}<span>ここでの編集内容は<b>変更履歴</b>に記録されます。元の請求書（右）には影響しません。</span></div>
-  </div>`;
-  const right=`<div class="pn-right">
-    <div class="pv-toolbar"><span style="display:flex">${I.file("#E5E7EB",14)}</span><span class="fn">${esc(d.name)}</span>
-      <button onclick="pvZoom(-10)">−</button><span id="pv-zoom">${state.pvZoom}%</span><button onclick="pvZoom(10)">＋</button></div>
-    <div class="pv-page-wrap" id="pv-page-wrap">${buildPreview(d)}</div>
-    <div class="pv-foot"><button class="pv-download" onclick="downloadOriginal('${d.id}')">${I.download("#1B2330",17)} ファイルの原本をダウンロード</button></div>
-  </div>`;
-  return `<div class="panel-ovl ${state._ovFresh?'anim':''}" onclick="if(event.target===this)closeVehDocPanel()"><div class="panel panel-vehdoc anim">
-    ${head}<div class="pn-body">${left}${right}</div></div></div>`;
+/* 「完了」：ドラフトを実データへ保存し、内訳一覧へ戻る（連携済みでも明細を直接更新） */
+function vehDocCompleteSave(){
+  const d=docs.find(x=>x.id===state.panelId);
+  if(d&&state.draft){
+    Object.assign(d,{cat:state.draft.cat,category:state.draft.category,vendor:state.draft.vendor});
+    writeLines(d.id, state.draft.lines);
+    // 連携済み明細を直接更新したため、当該書類の override 調整は破棄（二重適用の防止）
+    for(let i=ADJUSTMENTS.length-1;i>=0;i--){ if(ADJUSTMENTS[i].docId===d.id) ADJUSTMENTS.splice(i,1); }
+  }
+  state.panelId=null; state.draft=null; state.pvOriginal=null; state.pnDeleteLid=null; state.aiConfirm=null; state.panelCtx=null;
+  render(); // 背面の車両コスト表・内訳一覧を更新（変更履歴は内訳を閉じる時に記録）
+  toast("内訳を保存しました");
 }
 /* ───── 車両分析サイドパネル ───── */
 function _hash(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
@@ -5532,7 +5521,7 @@ function renderCostCsvModal(){
 let _ovKind="";
 function renderOverlay(){
   const ov=document.getElementById("overlay");
-  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehDocPanelDocId?"vehdocpanel": state.vehDocsKey?"vehdocs": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": state.costCsv?"costcsv": "";
+  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehDocsKey?"vehdocs": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": state.costCsv?"costcsv": "";
   state._ovFresh = (kind!=="" && kind!==_ovKind); // 同じオーバーレイの再描画ではアニメさせない
   _ovKind=kind;
   let h="";
@@ -5543,7 +5532,6 @@ function renderOverlay(){
     if(state.upload.dupAlert) h+=renderDupAlert();
   }
   else if(state.panelId){ h=renderPanel(); state.panelJustOpened=false; }
-  else if(state.vehDocPanelDocId) h=renderVehDocPanel();
   else if(state.vehDocsKey) h=renderVehDocsModal();
   else if(state.vehPanel) h=renderVehPanel();
   else if(state.changelogOpen) h=renderChangelog();
