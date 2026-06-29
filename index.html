@@ -433,6 +433,10 @@
   .read-hint{display:flex;align-items:flex-start;gap:5px;margin-top:5px;font-size:10.5px;line-height:1.45;color:#0E5A40;background:rgba(23,125,88,.08);border:1px solid rgba(23,125,88,.22);border-radius:6px;padding:4px 7px}
   .read-hint svg{flex-shrink:0;margin-top:1px}
   .read-hint b{font-weight:800}
+  /* 原価項目：参考値（自動判定・変更不可）。点線枠＋淡色背景で非編集を明示 */
+  .komoku-ref{display:flex;align-items:center;gap:8px;min-height:36px;box-sizing:border-box;padding:7px 10px;border:1px dashed var(--line);border-radius:8px;background:#F7F8F5;font-size:12.5px;font-weight:700;color:var(--ink)}
+  .komoku-ref .kr-empty{color:var(--inkFaint);font-weight:600}
+  .komoku-ref .kr-tag{margin-left:auto;flex-shrink:0;font-size:10px;font-weight:800;color:var(--inkSoft);background:#EAEDF0;border-radius:999px;padding:2px 8px}
   .in.b-r{border-color:#B23A2E!important;border-width:1.5px}
   .in.b-b{border-color:#2563EB!important;border-width:1.5px}
 
@@ -3070,10 +3074,10 @@ function renderPanel(){
       <div class="lc-head"><span class="lc-no">明細 ${idx+1}</span>
         <span class="match-badge" id="pn-badge-${l.lid}">${matchBadge(l)}</span>
         ${isReflected?"":`<button class="lc-del" title="この明細を削除" onclick="pnAskDeleteLine(${l.lid})">${I.x("#B23A2E",15)}</button>`}</div>
-      <div class="fld" id="pn-item-wrap-${l.lid}"><label>項目（現場がわかる表現から選択）</label>${genbaSelectHTML(l.lid,l,isReflected)}${readHintHTML(l)}</div>
+      <div class="fld" id="pn-item-wrap-${l.lid}"><label>項目（OCR判定対象・部分一致で候補を上位表示）</label>${genbaSelectHTML(l.lid,l,isReflected)}${readHintHTML(l)}</div>
       <div class="grid2">
-        <div class="fld"><label>原価項目（原価分類） ${catHelp()}</label>
-          ${komokuSelectHTML(l.lid,l,isReflected)}
+        <div class="fld"><label>原価項目（自動判定・参考値） ${catHelp()}</label>
+          ${komokuRefHTML(l)}
           <div id="pn-bunrui-${l.lid}" class="bunrui-wrap">${bunruiBadge(l)}</div></div>
         <div class="fld"><label>発生日</label><input class="in mono" ${ro} value="${esc(l.inspectedAt)}" oninput="pnLine(${l.lid},'inspectedAt',this.value)"></div>
       </div>
@@ -3186,8 +3190,16 @@ function pnLine(lid,field,val){
     const ck=document.getElementById("pn-amtck-"+lid); if(ck) ck.style.display=(state.draft._ocr||[]).includes(l.amount)?"":"none";}
   else if(field==="liters"||field==="unitPrice"){ const s=String(val).replace(/[^0-9.]/g,""); l[field]=s===""?null:parseFloat(s); }
   else if(field==="meisai"){
-    // 項目（現場表現）を選択：裏でC明細（label）に紐づけて保存。コスト管理の各項目（C列）へ反映される。
+    // 項目（OCR判定対象）を選択：裏でC明細（label）に紐づけて保存。
+    // 原価項目（komoku）・コスト分類（cat）は項目から自動判定（参考値）し、表示を更新する。
     l.meisai=val||"";
+    const e=MEISAI_INDEX[val];
+    if(e){ l.komoku=e.komoku; const idx=KOMOKU_INDEX[e.komoku]; if(idx) l.cat=idx.legacyCat; }
+    const kr=document.getElementById("pn-komoku-"+lid); if(kr) kr.innerHTML=komokuRefInner(l)+`<span class="kr-tag">参考</span>`;
+    const bw=document.getElementById("pn-bunrui-"+lid); if(bw) bw.innerHTML=bunruiBadge(l);
+    const sc=resolveSubcat(l.cat,l.item); if(sc) l.subCat=sc; else delete l.subCat;
+    const fw=document.getElementById("pn-fuel-wrap-"+lid); if(fw) fw.innerHTML=fuelFieldsHTML(l);
+    refreshPreview(); return;
   }
   else if(field==="komoku"){
     // 原価項目を選択：原価項目を保存し、既存集計用の legacyCat（コスト分類）へ自動変換する
@@ -3213,19 +3225,38 @@ function komokuOptions(cur){
   const opts=order.map(k=>`<optgroup label="${esc(k)}">`+groups[k].map(km=>`<option value="${esc(km)}" ${km===cur?"selected":""}>${esc(km)}</option>`).join("")+`</optgroup>`).join("");
   return `<option value="" ${cur?"":"selected"}>（未分類）</option>${opts}`;
 }
-/* 原価項目セレクト（書類明細の編集パネル用） */
-function komokuSelectHTML(lid,l,disabled){
-  return `<select class="in" ${disabled?"disabled":""} onchange="pnLine(${lid},'komoku',this.value)">${komokuOptions(lineKomoku(l))}</select>`;
+/* 原価項目（参考値・変更不可）：選択した項目から自動判定して表示する。
+   原価項目は項目に従属するため、ここでは編集できず参考表示のみ。 */
+function komokuRefInner(l){
+  const km=lineKomoku(l);
+  return km?`<span class="kr-v">${esc(km)}</span>`:`<span class="kr-empty">項目を選ぶと自動判定されます</span>`;
 }
-/* 項目セレクト：現場がわかる表現（F列）を選択肢に、値は裏でC明細（label）に紐づく。
-   選択肢は当該明細の原価項目（komoku）配下の明細に絞り込む。 */
+function komokuRefHTML(l){
+  return `<div class="komoku-ref" id="pn-komoku-${l.lid}" title="原価項目は項目から自動判定される参考値です（直接編集はできません）">${komokuRefInner(l)}<span class="kr-tag">参考</span></div>`;
+}
+/* OCR読み取りテキストに対する項目候補のスコア。完全一致＝最優先、記載文言(kisai)の最長一致＝具体的なほど高優先、未一致＝0。 */
+function itemMatchScore(text,e){
+  const t=String(text||""); if(!t) return 0;
+  if(e.label===t||e.genba===t) return 1000;
+  let best=0; (e.kisai||[]).forEach(k=>{ if(k&&t.indexOf(k)>=0&&k.length>best) best=k.length; }); return best;
+}
+/* 項目セレクト（OCR判定対象）：記載文言に部分一致する候補を優先度の高い順に上位表示し、
+   続けて全項目を原価項目（scope｜komoku）でグルーピングして選択可能にする。
+   値＝C明細(label)、表示＝現場表現(genba)。選択した項目から原価項目が自動的に決まる。 */
 function genbaSelectHTML(lid,l,disabled){
-  const km=lineKomoku(l); const items=KOMOKU_ITEMS[km]||[];
-  const cur=lineMeisai(l); let inList=false;
-  const opts=items.map(it=>{ if(it.label===cur)inList=true; return `<option value="${esc(it.label)}" ${it.label===cur?"selected":""}>${esc(it.genba||it.label)}</option>`; }).join("");
-  const head=(cur&&!inList)?`<option value="${esc(cur)}" selected>${esc(genbaOf(cur))}</option>`:"";
+  const cur=lineMeisai(l);
+  const text=(l&&l.item||"").trim();
+  const scored=CROSS_REF.map((e,i)=>({e,s:itemMatchScore(text,e),i}));
+  const matched=scored.filter(x=>x.s>0).sort((a,b)=>b.s-a.s||a.i-b.i);
+  const curInMatched=matched.some(x=>x.e.label===cur);
   const none=`<option value="" ${cur?"":"selected"}>（未選択）</option>`;
-  return `<select class="in b-g" ${disabled?"disabled":""} onchange="pnLine(${lid},'meisai',this.value)">${head}${none}${opts}</select>`;
+  const candHtml=matched.length
+    ? `<optgroup label="🔎 読み取り候補（部分一致・優先順）">`+matched.map(x=>`<option value="${esc(x.e.label)}" ${x.e.label===cur?"selected":""}>${esc(x.e.genba)}</option>`).join("")+`</optgroup>`
+    : "";
+  const groups={},order=[];
+  CROSS_REF.forEach(e=>{ const k=e.scope+"｜"+e.komoku; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(e); });
+  const fullHtml=order.map(k=>`<optgroup label="${esc(k)}">`+groups[k].map(e=>`<option value="${esc(e.label)}" ${(!curInMatched&&e.label===cur)?"selected":""}>${esc(e.genba)}</option>`).join("")+`</optgroup>`).join("");
+  return `<select class="in b-g" ${disabled?"disabled":""} onchange="pnLine(${lid},'meisai',this.value)">${none}${candHtml}${fullHtml}</select>`;
 }
 /* AI読み取りヒント：書類の記載（G列）を読み取り、項目（F列）を自動入力したことを示す */
 function readHintHTML(l){
