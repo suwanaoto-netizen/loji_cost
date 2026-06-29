@@ -631,6 +631,10 @@
   .veh-edit-btn{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);color:var(--greenDark);border-radius:8px;padding:6px 13px;font-size:12.5px;font-weight:700;cursor:pointer}
   .veh-edit-btn:hover{border-color:var(--greenLine);background:var(--greenSoft)}
   .modal-wide{width:min(860px,100%)}
+  .modal-docs{width:min(1080px,97vw)}
+  .modal-docs .dt tbody tr{cursor:pointer}
+  .panel-vehdoc{width:min(1180px,97vw)}
+  .panel-vehdoc .pn-left{width:54%}
   .veh-edit-body{padding:18px 20px}
   .ve-meta{display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap}
   .ve-sum{font-size:12.5px;color:var(--inkSoft)}
@@ -2125,6 +2129,8 @@ let state={
   splitUpload:{method:"pdf", file:null, split:false, ocr:true, category:"", settingsOpen:false, pages:null, bulkMenu:false, zoom:null, guide:0},
   vehExpanded:new Set(),
   vehEditKey:null, vehEditMeta:null, vehEditConfirm:false, vehEditSnapshot:null, vehViewDocId:null, vehViewLid:null,
+  vehDocsKey:null, vehDocsMeta:null, vehDocsKomoku:"all", vehDocsStart:null, vehDocsEnd:null, vehDocsPage:1, vehDocsPerPage:20,
+  vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, vehDocPanelDocId:null,
   vehPanel:null, vehChartCat:null, vehChartGran:"month", vehTlExpanded:false,
   vehTrash:new Set(), vehTrashView:false, vehTrashAction:null,
   changelogOpen:false, changelogSeenCount:0, vehEditHighlight:null,
@@ -3140,8 +3146,9 @@ function buildPreview(d, pageIdx){
     ${sumBlock}
   </div>`;
 }
-function refreshPreview(){const w=document.getElementById("pv-page-wrap");if(w)w.innerHTML=buildPreview(state.pvOriginal||state.draft);  const z=document.getElementById("pv-zoom");if(z)z.textContent=state.pvZoom+"%";
-  const t=document.getElementById("pn-total");if(t)t.textContent=yen(docTotal(state.draft));}
+function refreshPreview(){const src=state.pvOriginal||state.draft||(state.vehDocPanelDocId?docs.find(x=>x.id===state.vehDocPanelDocId):null); if(!src)return;
+  const w=document.getElementById("pv-page-wrap");if(w)w.innerHTML=buildPreview(src);  const z=document.getElementById("pv-zoom");if(z)z.textContent=state.pvZoom+"%";
+  const t=document.getElementById("pn-total");if(t&&state.draft)t.textContent=yen(docTotal(state.draft));}
 function pvZoom(dz){state.pvZoom=Math.max(50,Math.min(200,state.pvZoom+dz));refreshPreview();}
 function downloadOriginal(docId){
   const d=docs.find(x=>x.id===docId)||state.draft; if(!d)return;
@@ -3748,6 +3755,279 @@ function renderVehEditModal(){
     <div class="m-body veh-edit-body">${editPane}</div>
     <div class="m-foot"><button class="btn-green" onclick="vehEditAskConfirm()">${I.check("#fff",14,3)} 完了</button></div>
   </div></div>`;
+}
+/* ───── 内訳編集（車両ごとの書類一覧 → 右サイドパネルで編集） ─────
+   一覧の「内訳編集」から開く。車両に紐づく連携済み書類を書類一覧風に表示し、
+   原価項目・発生期間で絞り込む（既定＝当月＋先月）。行をクリックすると右サイドパネルで
+   その書類の当該車両明細を編集できる（連携済み明細は override 調整として記録）。 */
+function vehDocsDefaultRange(){
+  const {y,m}=_ymParts(_CAL_TODAY.slice(0,7));
+  const prev=new Date(y,m-2,1); // 先月の1日
+  const start=`${prev.getFullYear()}-${_pad2(prev.getMonth()+1)}-01`;
+  const end=`${y}-${_pad2(m)}-${_pad2(_daysIn(y,m))}`; // 当月の末日
+  return {start,end};
+}
+function openVehDocs(key,kind,target){
+  state.vehDocsKey=key; state.vehDocsMeta={key,kind,target};
+  state.vehDocsKomoku="all";
+  const r=vehDocsDefaultRange(); state.vehDocsStart=r.start; state.vehDocsEnd=r.end;
+  state.vehDocsPage=1; state.vehDocsCalOpen=false; state.vehDocPanelDocId=null;
+  const v=buildVehicles("all").find(x=>x.key===key);
+  state.vehDocsSnapshot = v ? v.lines.filter(l=>l.src==="doc").map(l=>({lid:String(l.lid),docId:l.docId,item:l.item,komoku:lineKomoku(l),date:l.date,amount:+l.amount})) : [];
+  renderOverlay();
+}
+function closeVehDocs(){
+  vehDocsCommit(); // 期間中の編集差分を変更履歴に記録
+  state.vehDocsKey=null; state.vehDocsMeta=null; state.vehDocsSnapshot=null;
+  state.vehDocsCalOpen=false; state.vehDocPanelDocId=null;
+  render();
+}
+/* 開いている間に行った override 編集を、スナップショットと突合して変更履歴へ記録 */
+function vehDocsCommit(){
+  const snap=state.vehDocsSnapshot; const m=state.vehDocsMeta; if(!snap||!m) return;
+  const v=buildVehicles("all").find(x=>x.key===m.key); if(!v) return;
+  const snapMap=new Map(snap.map(l=>[l.lid,l]));
+  v.lines.filter(l=>l.src==="doc").forEach(l=>{
+    const s=snapMap.get(String(l.lid)); if(!s) return; const fields=[];
+    if(l.item!==s.item) fields.push(["項目",s.item,l.item]);
+    if(lineKomoku(l)!==s.komoku) fields.push(["原価項目",s.komoku,lineKomoku(l)]);
+    if(l.date!==s.date) fields.push(["発生日",s.date,l.date]);
+    if(+l.amount!==+s.amount) fields.push(["金額",yen(s.amount),yen(l.amount)]);
+    if(fields.length) logChange({vehKey:m.key,kind:m.kind,vehTarget:m.target,item:l.item,cat:l.cat,komoku:lineKomoku(l),lid:l.lid,docId:l.docId,action:"変更",detail:fields.map(f=>`${f[0]}を ${f[1]} → ${f[2]}`).join("、")});
+  });
+  // 次に閉じる時に二重記録しないよう、スナップショットを現状に取り直す
+  state.vehDocsSnapshot = v.lines.filter(l=>l.src==="doc").map(l=>({lid:String(l.lid),docId:l.docId,item:l.item,komoku:lineKomoku(l),date:l.date,amount:+l.amount}));
+}
+function setVehDocsKomoku(v){ state.vehDocsKomoku=v; state.vehDocsPage=1; renderOverlay(); }
+function setVehDocsPage(p){ state.vehDocsPage=+p; renderOverlay(); }
+function setVehDocsPerPage(n){ state.vehDocsPerPage=+n; state.vehDocsPage=1; renderOverlay(); }
+/* 期間カレンダー（一覧の発生期間カレンダーと同UI・専用state） */
+function toggleVehDocsCal(){ state.vehDocsCalOpen=!state.vehDocsCalOpen; if(state.vehDocsCalOpen){ state.vehDocsCalYM=(state.vehDocsStart||_CAL_TODAY).slice(0,7);} renderOverlay(); }
+function closeVehDocsCal(){ state.vehDocsCalOpen=false; renderOverlay(); }
+function vehDocsCalNav(delta){ const {y,m}=_ymParts(state.vehDocsCalYM); const d=new Date(y,m-1+delta,1); state.vehDocsCalYM=`${d.getFullYear()}-${_pad2(d.getMonth()+1)}`; renderOverlay(); }
+function vehDocsCalPickMonth(delta){ const {y,m}=_ymParts(state.vehDocsCalYM); const d=new Date(y,m-1+delta,1); const yy=d.getFullYear(),mm=d.getMonth()+1;
+  state.vehDocsStart=`${yy}-${_pad2(mm)}-01`; state.vehDocsEnd=`${yy}-${_pad2(mm)}-${_pad2(_daysIn(yy,mm))}`; state.vehDocsCalYM=`${yy}-${_pad2(mm)}`; state.vehDocsCalOpen=false; state.vehDocsPage=1; renderOverlay(); }
+function vehDocsCalPickDay(iso){
+  const s=state.vehDocsStart, e=state.vehDocsEnd;
+  if(!s || (s&&e)){ state.vehDocsStart=iso; state.vehDocsEnd=null; }
+  else { if(iso<s){ state.vehDocsEnd=s; state.vehDocsStart=iso; } else { state.vehDocsEnd=iso; } state.vehDocsCalOpen=false; }
+  state.vehDocsPage=1; renderOverlay();
+}
+function clearVehDocsCal(){ state.vehDocsStart=null; state.vehDocsEnd=null; state.vehDocsPage=1; renderOverlay(); }
+function vehDocsQuickDefault(){ const r=vehDocsDefaultRange(); state.vehDocsStart=r.start; state.vehDocsEnd=r.end; state.vehDocsCalOpen=false; state.vehDocsPage=1; renderOverlay(); }
+function renderVehDocsCal(){
+  if(!state.vehDocsCalOpen) return "";
+  const {y,m}=_ymParts(state.vehDocsCalYM);
+  const s=state.vehDocsStart, e=state.vehDocsEnd;
+  const hint = (s&&e) ? `<div class="vcal-hint done">${s}〜${e}</div>` : `<div class="vcal-hint">開始日か終了日を選択してください</div>`;
+  const startDow=new Date(y,m-1,1).getDay();
+  const cells=[];
+  for(let i=0;i<42;i++){
+    const d=new Date(y,m-1,1-startDow+i);
+    const iso=`${d.getFullYear()}-${_pad2(d.getMonth()+1)}-${_pad2(d.getDate())}`;
+    const out=d.getMonth()!==(m-1), dow=d.getDay();
+    let cls="vcal-d"; if(out)cls+=" out"; else { if(dow===0)cls+=" sun"; if(dow===6)cls+=" sat"; }
+    if(iso===_CAL_TODAY)cls+=" today";
+    const isStart=s&&iso===s, isEnd=e&&iso===e;
+    if(s&&e&&iso>s&&iso<e) cls+=" in-range";
+    if(isStart||isEnd||(s&&!e&&iso===s)) cls+=" range-end-pt";
+    cells.push(`<button class="${cls}" onclick="vehDocsCalPickDay('${iso}')">${d.getDate()}</button>`);
+  }
+  const wd=["日","月","火","水","木","金","土"].map((w,i)=>`<div class="vcal-wd ${i===0?'sun':i===6?'sat':''}">${w}</div>`).join("");
+  const pm=m===1?12:m-1, nm=m===12?1:m+1;
+  return `<div class="vcal-backdrop" onclick="closeVehDocsCal()"></div><div class="vcal-pop" onclick="event.stopPropagation()">
+    <div class="vcal-head"><button class="vcal-nav" onclick="vehDocsCalNav(-1)">◀前月</button>
+      <span class="vcal-title">${y}年 ${m}月</span>
+      <button class="vcal-nav" onclick="vehDocsCalNav(1)">次月▶</button></div>
+    ${hint}
+    <div class="vcal-quick"><button onclick="vehDocsCalPickMonth(-1)">${pm}月を選択</button><button onclick="vehDocsCalPickMonth(0)">${m}月を選択</button><button onclick="vehDocsCalPickMonth(1)">${nm}月を選択</button></div>
+    <div class="vcal-grid vcal-wds">${wd}</div>
+    <div class="vcal-grid vcal-days">${cells.join("")}</div>
+    <div class="vcal-foot"><button class="vcal-clear" onclick="vehDocsQuickDefault()">当月＋先月に戻す</button><button class="vcal-close" onclick="closeVehDocsCal()">閉じる</button></div>
+  </div>`;
+}
+/* 車両に紐づく書類を、原価項目・発生期間で絞り込んで返す。
+   返り値：[{d:書類, lines:この車両の該当明細, amount:該当明細合計, last:最新発生日}] を発生日の新しい順で */
+function vehDocsList(){
+  const key=state.vehDocsKey; if(!key) return [];
+  const v=buildVehicles("all").find(x=>x.key===key); if(!v) return [];
+  const start=state.vehDocsStart, end=state.vehDocsEnd;
+  const inR = (start&&end) ? (dt=>dt&&dt>=start&&dt<=end) : (()=>true);
+  const kf=state.vehDocsKomoku;
+  const map=new Map();
+  v.lines.forEach(l=>{
+    if(l.src!=="doc"||!l.docId) return;
+    if(!inR(l.date)) return;
+    if(kf!=="all" && lineKomoku(l)!==kf) return;
+    if(!map.has(l.docId)) map.set(l.docId,{docId:l.docId,lines:[]});
+    map.get(l.docId).lines.push(l);
+  });
+  const out=[];
+  map.forEach(g=>{ const d=docs.find(x=>x.id===g.docId); if(!d) return;
+    const amount=g.lines.reduce((s,l)=>s+(+l.amount||0),0);
+    const last=g.lines.map(l=>l.date).sort().slice(-1)[0]||"";
+    out.push({d,lines:g.lines,amount,last}); });
+  out.sort((a,b)=>{ if(a.last<b.last) return 1; if(a.last>b.last) return -1; return b.d.no-a.d.no; });
+  return out;
+}
+/* 絞り込みに使う原価項目の選択肢（この車両の書類明細に実在する原価項目のみ） */
+function vehDocsKomokuList(){
+  const key=state.vehDocsKey; if(!key) return [];
+  const v=buildVehicles("all").find(x=>x.key===key); if(!v) return [];
+  const order=ALL_COST_MODEL.map(g=>g.komoku);
+  const set=new Set(); v.lines.forEach(l=>{ if(l.src==="doc"){ const k=lineKomoku(l); if(k) set.add(k); } });
+  return [...set].sort((a,b)=>{ const ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?999:ia)-(ib<0?999:ib); });
+}
+function renderVehDocsModal(){
+  const key=state.vehDocsKey; if(!key) return "";
+  const m=state.vehDocsMeta||{key,kind:"単車",target:key};
+  const titlePlate=`<span class="plate" style="margin-right:9px">${esc(m.target)}</span>`;
+  const list=vehDocsList();
+  const hasRange=state.vehDocsStart&&state.vehDocsEnd;
+  // 原価項目フィルタ
+  const komokus=vehDocsKomokuList();
+  const komokuSel=`<div class="filter-sel"><span class="fs-l">${I.tag?I.tag("#5A6472",14):I.boxes("#5A6472",14)} 原価項目</span>
+    <select onchange="setVehDocsKomoku(this.value)"><option value="all" ${state.vehDocsKomoku==="all"?"selected":""}>すべて</option>
+      ${komokus.map(k=>`<option value="${esc(k)}" ${state.vehDocsKomoku===k?"selected":""}>${esc(k)}</option>`).join("")}</select></div>`;
+  // 期間フィルタ（カレンダー）
+  const periodCtrl=`<div class="vcal-wrap">
+    <button class="vcal-field ${state.vehDocsCalOpen?'open':''}" onclick="toggleVehDocsCal()" title="発生期間で絞り込み">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5A6472" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      ${hasRange?`<span>${state.vehDocsStart}〜${state.vehDocsEnd}</span>`:`<span class="ph">発生期間（全期間）</span>`}
+      ${hasRange?`<span class="vcal-x" onclick="event.stopPropagation();clearVehDocsCal()" title="クリア">×</span>`:""}
+    </button>
+    ${renderVehDocsCal()}
+  </div>`;
+  const filterBar=`<div class="veh-filters"><span class="vf-l">絞り込み</span>${komokuSel}${periodCtrl}</div>`;
+
+  // ページング
+  const per=state.vehDocsPerPage;
+  const pages=Math.max(1,Math.ceil(list.length/per));
+  if(state.vehDocsPage>pages) state.vehDocsPage=pages; if(state.vehDocsPage<1) state.vehDocsPage=1;
+  const startIdx=(state.vehDocsPage-1)*per;
+  const info={total:list.length,per,pages,page:state.vehDocsPage,start:startIdx};
+  const slice=list.slice(startIdx,startIdx+per);
+
+  let body;
+  if(list.length===0){
+    body=`<div class="twrap"><div class="empty">${I.file("#C0C7CF",40)}
+      <div class="et">該当する書類がありません</div>
+      <div class="es">${hasRange?"発生期間や原価項目の絞り込みを変更してください。":"この車両に紐づく連携済み書類がありません。"}</div></div></div>`;
+  }else{
+    const rows=slice.map(({d,lines,amount,last})=>{
+      const koms=[...new Set(lines.map(l=>lineKomoku(l)).filter(Boolean))];
+      const komCell=koms.length?koms.map(k=>`<span class="office-chip">${esc(k)}</span>`).join(" "):`<span class="office-none">—</span>`;
+      return `<tr onclick="openVehDocPanel('${d.id}')">
+        <td class="no">${d.no}</td>
+        <td>${statusChip(d.status)}</td>
+        <td><div class="docname">${I.file("#177D58",16)}<span class="nm" title="${esc(d.name)}">${esc(d.name)}</span></div></td>
+        <td class="vendor">${esc(d.vendor)}</td>
+        <td class="date">${last||docDate(d)}</td>
+        <td>${komCell}</td>
+        <td class="lc">${lines.length} 件</td>
+        <td class="r">${yen(amount)}</td>
+      </tr>`;
+    }).join("");
+    const table=`<div class="twrap"><div class="tscroll"><table class="dt">
+      <thead><tr>${thVehDocs('no','No')}${thVehDocs('status','ステータス')}${thVehDocs('name','区分・書類名')}${thVehDocs('vendor','取引先')}${thVehDocs('date','取引日')}<th>原価項目</th>${thVehDocs('lines','明細')}${thVehDocs('amount','金額（この車両分）','r')}</tr></thead>
+      <tbody>${rows}</tbody></table></div>${vehDocsPager(info)}</div>`;
+    body=`<p class="count-line">表示中 <b>${list.length}</b> 件${state.vehDocsKomoku!=="all"?`<span class="filter-summary">原価項目：${esc(state.vehDocsKomoku)}<button class="fs-clear" onclick="setVehDocsKomoku('all')">クリア</button></span>`:""}</p>${table}`;
+  }
+
+  return `<div class="ovl ${state._ovFresh?'anim':''}" onclick="if(event.target===this)closeVehDocs()"><div class="modal modal-docs">
+    <div class="m-head"><span class="t">${titlePlate}の内訳（書類一覧）</span>
+      <button class="x" onclick="closeVehDocs()">${I.x("#5A6472",18)}</button></div>
+    <div class="m-body">
+      <div class="vd-sub" style="margin:0 0 12px">この車両に紐づく連携済み書類を一覧表示します。<b>原価項目</b>・<b>発生期間</b>で絞り込めます（既定＝当月＋先月）。行をクリックすると右側のパネルで内容を編集できます。</div>
+      ${filterBar}
+      ${body}
+    </div>
+  </div></div>`;
+}
+/* 内訳書類一覧の並び替えヘッダー（簡易・No基準の安定ソートのみ。視覚的整合のため書類一覧と同形） */
+function thVehDocs(key,label,cls){ return `<th class="${cls||""}">${label}</th>`; }
+function vehDocsPager(info){
+  if(info.total===0) return "";
+  const start=info.start+1, end=Math.min(info.start+info.per,info.total);
+  const opts=[20,50,100].map(n=>`<option value="${n}" ${n===info.per?"selected":""}>${n}</option>`).join("");
+  return `<div class="pager">
+    <span class="pg-range">全 <b>${info.total}</b> 件中 <b>${start}</b>–<b>${end}</b> 件を表示</span>
+    <div class="pg-spacer"></div>
+    <span class="pg-per">1ページあたり <select onclick="event.stopPropagation()" onchange="setVehDocsPerPage(this.value)">${opts}</select> 件</span>
+    <div class="pg-nav">
+      <button class="pg-btn" ${info.page<=1?"disabled":""} onclick="setVehDocsPage(${info.page-1})">‹ 前へ</button>
+      <span class="pg-cur">${info.page} / ${info.pages}</span>
+      <button class="pg-btn" ${info.page>=info.pages?"disabled":""} onclick="setVehDocsPage(${info.page+1})">次へ ›</button>
+    </div></div>`;
+}
+/* ───── 内訳：書類ごとの右サイドパネル（当該車両明細を override 編集） ───── */
+function openVehDocPanel(docId){ state.vehDocPanelDocId=docId; state.vehDocsCalOpen=false; state.pvZoom=100; renderOverlay(); }
+function closeVehDocPanel(){ state.vehDocPanelDocId=null; renderOverlay(); }
+function vehDocPanelNav(delta){
+  const list=vehDocsList(); const ids=list.map(x=>x.d.id);
+  const idx=ids.indexOf(state.vehDocPanelDocId); if(idx<0) return;
+  const ni=idx+delta; if(ni<0||ni>=ids.length) return;
+  state.vehDocPanelDocId=ids[ni]; state.pvZoom=100;
+  state.vehDocsPage=Math.floor(ni/state.vehDocsPerPage)+1; // 背面の一覧も同期
+  renderOverlay();
+}
+function renderVehDocPanel(){
+  const docId=state.vehDocPanelDocId; if(!docId) return "";
+  const d=docs.find(x=>x.id===docId); if(!d) return "";
+  const m=state.vehDocsMeta||{};
+  const v=buildVehicles("all").find(x=>x.key===m.key);
+  const lines=v?v.lines.filter(l=>l.src==="doc"&&l.docId===docId):[];
+  const list=vehDocsList(); const ids=list.map(x=>x.d.id); const pos=ids.indexOf(docId);
+  const hasPrev=pos>0, hasNext=pos>=0&&pos<ids.length-1;
+  const navPos=pos>=0?`<span class="pn-navpos">${pos+1} / ${ids.length}</span>`:"";
+  const titlePlate=`<span class="plate" style="margin-right:6px">${esc(m.target)}</span>`;
+  const total=lines.reduce((s,l)=>s+(+l.amount||0),0);
+  const head=`<div class="pn-head">
+    ${titlePlate}
+    <div class="pn-no">No. <b>${d.no}</b></div>
+    ${statusChip(d.status)}
+    <div class="pn-nav">
+      <button class="pn-navbtn" ${hasPrev?"":"disabled"} title="前の書類" onclick="vehDocPanelNav(-1)"><span class="ic-l">${I.chev("#5A6472",13)}</span>前へ</button>
+      ${navPos}
+      <button class="pn-navbtn" ${hasNext?"":"disabled"} title="次の書類" onclick="vehDocPanelNav(1)">次へ<span class="ic-r">${I.chev("#5A6472",13)}</span></button>
+    </div>
+    <div class="pn-actions">
+      <button class="btn-green" onclick="closeVehDocPanel()">${I.check("#fff",14,3)} 完了</button>
+      <button class="icon-btn" style="border-color:var(--line)" title="閉じる" onclick="closeVehDocPanel()">${I.x("#5A6472",16)}</button>
+    </div>
+  </div>`;
+  const rows=lines.slice().sort((a,b)=>a.date<b.date?1:-1).map(x=>{
+    const onEdit=`vehEditDocLine('${x.docId}',${x.lid}`;
+    return `<tr>
+      <td style="width:116px"><input class="vd-in mono" value="${esc(x.date)}" onchange="${onEdit},'date',this.value)"></td>
+      <td style="min-width:120px"><input class="vd-in" value="${esc(x.item)}" onchange="${onEdit},'item',this.value)"></td>
+      <td style="width:150px"><select class="vd-in" onchange="${onEdit},'komoku',this.value)">${komokuOptions(lineKomoku(x))}</select></td>
+      <td style="width:100px"><input class="vd-in mono ta-r" value="${(+x.amount)}" onchange="${onEdit},'amount',this.value)"></td>
+    </tr>`;
+  }).join("");
+  const tbl=`<table class="vd-tbl"><thead><tr><th style="white-space:nowrap">発生日</th><th>項目</th><th style="white-space:nowrap">原価項目</th><th style="text-align:right">金額</th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="4" style="text-align:center;color:var(--inkSoft);padding:16px">この期間・原価項目に該当する明細がありません。</td></tr>'}</tbody></table>`;
+  const left=`<div class="pn-left">
+    <div class="pn-sec">書類情報</div>
+    <div class="fld"><label>書類名</label><input class="in" value="${esc(d.name)}" readonly></div>
+    <div class="grid2">
+      <div class="fld"><label>営業所</label><input class="in" value="${esc(d.category||"未分類")}" readonly></div>
+      <div class="fld"><label>取引先</label><input class="in" value="${esc(d.vendor)}" readonly></div>
+    </div>
+    <div class="total-box"><span class="lab">この車両分の合計（明細 ${lines.length}件）</span><span class="v">${yen(total)}</span></div>
+    <div class="pn-sec">${esc(m.target)} の明細 <span class="ct">${lines.length}件</span></div>
+    <div class="vd-sub" style="margin:0 2px 10px">行を直接編集できます。連携済み明細の変更は調整として記録され、コスト集計に即時反映されます（請求書原本は変更されません）。</div>
+    ${tbl}
+    <div class="pn-foot-note">${I.db("#B87514",16)}<span>ここでの編集内容は<b>変更履歴</b>に記録されます。元の請求書（右）には影響しません。</span></div>
+  </div>`;
+  const right=`<div class="pn-right">
+    <div class="pv-toolbar"><span style="display:flex">${I.file("#E5E7EB",14)}</span><span class="fn">${esc(d.name)}</span>
+      <button onclick="pvZoom(-10)">−</button><span id="pv-zoom">${state.pvZoom}%</span><button onclick="pvZoom(10)">＋</button></div>
+    <div class="pv-page-wrap" id="pv-page-wrap">${buildPreview(d)}</div>
+    <div class="pv-foot"><button class="pv-download" onclick="downloadOriginal('${d.id}')">${I.download("#1B2330",17)} ファイルの原本をダウンロード</button></div>
+  </div>`;
+  return `<div class="panel-ovl ${state._ovFresh?'anim':''}" onclick="if(event.target===this)closeVehDocPanel()"><div class="panel panel-vehdoc anim">
+    ${head}<div class="pn-body">${left}${right}</div></div></div>`;
 }
 /* ───── 車両分析サイドパネル ───── */
 function _hash(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
@@ -4506,7 +4786,7 @@ function renderVehIndividual(){
   const rows=pageVeh.map(v=>{
     const actCell=inTrash
       ? `<button class="icon-btn restore" title="コストモニターに戻す" onclick="event.stopPropagation();vehAskRestore('${v.key}')">${I.undo("#0E7A4B",13)}</button>`
-      : `<button class="veh-edit-btn" onclick="event.stopPropagation();openVehEdit('${v.key}','${v.kind}','${esc(v.target)}')">${I.pencil("#0E7A4B",13)} 編集</button>
+      : `<button class="veh-edit-btn" onclick="event.stopPropagation();openVehDocs('${v.key}','${v.kind}','${esc(v.target)}')">${I.pencil("#0E7A4B",13)} 内訳編集</button>
          <button class="icon-btn" title="ゴミ箱へ移動" style="margin-left:5px" onclick="event.stopPropagation();vehAskTrash('${v.key}')">${I.trash("#B23A2E",13)}</button>`;
     const metricCells=vehicleMetrics(v).map(g=>{const cs=bunruiStyle(g.bunrui);
       return g.metrics.map((m,i)=>`<td class="vm-col ${i===0?"grp-start":""} ${m.isSum?"sum":""} ${m.na?"na":""}" ${m.isSum?`style="color:${cs.fg}"`:""}>${m.na?"—":yen(m.value)}</td>`).join("");
@@ -5252,7 +5532,7 @@ function renderCostCsvModal(){
 let _ovKind="";
 function renderOverlay(){
   const ov=document.getElementById("overlay");
-  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": state.costCsv?"costcsv": "";
+  const kind = state.upload.open?"upload": state.panelId?"panel": state.vehDocPanelDocId?"vehdocpanel": state.vehDocsKey?"vehdocs": state.vehPanel?"vehpanel": state.changelogOpen?"changelog": state.vehEditKey?"vehedit": state.masterEdit?"masteredit": state.costCsv?"costcsv": "";
   state._ovFresh = (kind!=="" && kind!==_ovKind); // 同じオーバーレイの再描画ではアニメさせない
   _ovKind=kind;
   let h="";
@@ -5263,6 +5543,8 @@ function renderOverlay(){
     if(state.upload.dupAlert) h+=renderDupAlert();
   }
   else if(state.panelId){ h=renderPanel(); state.panelJustOpened=false; }
+  else if(state.vehDocPanelDocId) h=renderVehDocPanel();
+  else if(state.vehDocsKey) h=renderVehDocsModal();
   else if(state.vehPanel) h=renderVehPanel();
   else if(state.changelogOpen) h=renderChangelog();
   else if(state.vehEditKey) h=renderVehEditModal();
