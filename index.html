@@ -2136,7 +2136,8 @@ let state={
   vehExpanded:new Set(),
   vehEditKey:null, vehEditMeta:null, vehEditConfirm:false, vehEditSnapshot:null, vehViewDocId:null, vehViewLid:null,
   vehDocsKey:null, vehDocsMeta:null, vehDocsKomoku:"all", vehDocsStart:null, vehDocsEnd:null, vehDocsPage:1, vehDocsPerPage:20,
-  vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, vehDocsDirty:false, panelCtx:null,
+  vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, vehDocsDirty:false,
+  vehDocsDiscardConfirm:false, vehDocsFinalizeConfirm:false, _vehDocsBackup:null, panelCtx:null,
   vehPanel:null, vehChartCat:null, vehChartGran:"month", vehTlExpanded:false,
   vehTrash:new Set(), vehTrashView:false, vehTrashAction:null,
   changelogOpen:false, changelogSeenCount:0, vehEditHighlight:null,
@@ -3813,31 +3814,62 @@ function openVehDocs(key,kind,target){
   state.vehDocsKomoku="all";
   const r=vehDocsDefaultRange(); state.vehDocsStart=r.start; state.vehDocsEnd=r.end;
   state.vehDocsPage=1; state.vehDocsCalOpen=false; state.vehDocsDirty=false;
+  state.vehDocsDiscardConfirm=false; state.vehDocsFinalizeConfirm=false;
   const v=buildVehicles("all").find(x=>x.key===key);
   state.vehDocsSnapshot = v ? v.lines.filter(l=>l.src==="doc").map(l=>({lid:String(l.lid),docId:l.docId,item:l.item,komoku:lineKomoku(l),date:l.date,amount:+l.amount})) : [];
+  vehDocsSnapshotData(); // 「編集を完了する」まで確定しない＝閉じる時に破棄できるよう実データを退避
   renderOverlay();
 }
-function closeVehDocs(){
-  vehDocsCommit(); // 期間中の編集差分を変更履歴に記録
+/* 内訳を開いた時点の実データ（LINES・ADJUSTMENTS・書類項目）を退避（破棄時に復元） */
+function vehDocsSnapshotData(){
+  state._vehDocsBackup = {
+    lines: JSON.parse(JSON.stringify(LINES)),
+    adj: JSON.parse(JSON.stringify(ADJUSTMENTS)),
+    docs: docs.map(d=>({id:d.id,cat:d.cat,category:d.category,vendor:d.vendor})),
+  };
+}
+/* 退避した実データへ復元（＝内訳での編集をすべて破棄） */
+function vehDocsRestoreData(){
+  const b=state._vehDocsBackup; if(!b) return;
+  LINES.length=0; b.lines.forEach(l=>LINES.push(l));
+  ADJUSTMENTS.length=0; b.adj.forEach(a=>ADJUSTMENTS.push(a));
+  const dmap=new Map(b.docs.map(x=>[x.id,x]));
+  docs.forEach(d=>{ const x=dmap.get(d.id); if(x){ d.cat=x.cat; d.category=x.category; d.vendor=x.vendor; } });
+}
+/* 内訳の状態をクリアして閉じる（実データの確定／破棄は呼び出し側で済ませる） */
+function clearVehDocsState(){
   state.vehDocsKey=null; state.vehDocsMeta=null; state.vehDocsSnapshot=null;
-  state.vehDocsCalOpen=false; state.vehDocPanelDocId=null;
+  state.vehDocsCalOpen=false; state.vehDocsDirty=false;
+  state.vehDocsDiscardConfirm=false; state.vehDocsFinalizeConfirm=false; state._vehDocsBackup=null;
   render();
 }
-/* 開いている間に行った override 編集を、スナップショットと突合して変更履歴へ記録 */
-function vehDocsCommit(){
-  const snap=state.vehDocsSnapshot; const m=state.vehDocsMeta; if(!snap||!m) return;
-  const v=buildVehicles("all").find(x=>x.key===m.key); if(!v) return;
+/* 閉じる要求（×・背景）。未確定の編集があれば破棄確認、無ければそのまま閉じる */
+function closeVehDocs(){
+  if(state.vehDocsDirty){ state.vehDocsDiscardConfirm=true; renderOverlay(); return; }
+  clearVehDocsState();
+}
+/* 内訳での編集の差分（スナップショット↔現状）。確認モーダル表示・変更履歴記録に共用 */
+function vehDocsDiff(){
+  const snap=state.vehDocsSnapshot; const m=state.vehDocsMeta; if(!snap||!m) return [];
+  const v=buildVehicles("all").find(x=>x.key===m.key); if(!v) return [];
   const snapMap=new Map(snap.map(l=>[l.lid,l]));
+  const out=[];
   v.lines.filter(l=>l.src==="doc").forEach(l=>{
     const s=snapMap.get(String(l.lid)); if(!s) return; const fields=[];
     if(l.item!==s.item) fields.push(["項目",s.item,l.item]);
     if(lineKomoku(l)!==s.komoku) fields.push(["原価項目",s.komoku,lineKomoku(l)]);
     if(l.date!==s.date) fields.push(["発生日",s.date,l.date]);
     if(+l.amount!==+s.amount) fields.push(["金額",yen(s.amount),yen(l.amount)]);
-    if(fields.length) logChange({vehKey:m.key,kind:m.kind,vehTarget:m.target,item:l.item,cat:l.cat,komoku:lineKomoku(l),lid:l.lid,docId:l.docId,action:"変更",detail:fields.map(f=>`${f[0]}を ${f[1]} → ${f[2]}`).join("、")});
+    if(fields.length) out.push({l,fields,docId:l.docId});
   });
-  // 次に閉じる時に二重記録しないよう、スナップショットを現状に取り直す
-  state.vehDocsSnapshot = v.lines.filter(l=>l.src==="doc").map(l=>({lid:String(l.lid),docId:l.docId,item:l.item,komoku:lineKomoku(l),date:l.date,amount:+l.amount}));
+  return out;
+}
+/* 編集差分を変更履歴へ記録（確定時のみ） */
+function vehDocsCommit(){
+  const m=state.vehDocsMeta; if(!m) return;
+  vehDocsDiff().forEach(d=>{
+    logChange({vehKey:m.key,kind:m.kind,vehTarget:m.target,item:d.l.item,cat:d.l.cat,komoku:lineKomoku(d.l),lid:d.l.lid,docId:d.l.docId,action:"変更",detail:d.fields.map(f=>`${f[0]}を ${f[1]} → ${f[2]}`).join("、")});
+  });
 }
 function setVehDocsKomoku(v){ state.vehDocsKomoku=v; state.vehDocsPage=1; renderOverlay(); }
 function setVehDocsPage(p){ state.vehDocsPage=+p; renderOverlay(); }
@@ -3976,10 +4008,10 @@ function renderVehDocsModal(){
   }
 
   const finalizeBtn=state.vehDocsDirty
-    ? `<button class="btn-green" style="margin-left:auto;margin-right:10px" onclick="vehDocsFinalize()">${I.check("#fff",14,3)} 編集を完了する</button>`
+    ? `<button class="btn-green" style="margin-right:12px" onclick="vehDocsFinalize()">${I.check("#fff",14,3)} 編集を完了する</button>`
     : "";
   return `<div class="ovl ${state._ovFresh?'anim':''}" onclick="if(event.target===this)closeVehDocs()"><div class="modal modal-docs">
-    <div class="m-head"><span class="t">${titlePlate}の内訳（書類一覧）</span>
+    <div class="m-head"><span class="t" style="flex:1">${titlePlate}の内訳（書類一覧）</span>
       ${finalizeBtn}
       <button class="x" onclick="closeVehDocs()">${I.x("#5A6472",18)}</button></div>
     <div class="m-body">
@@ -4038,14 +4070,67 @@ function vehDocCompleteSave(){
     state.vehDocsDirty=true; // 内訳一覧に「編集を完了する」ボタンを表示
   }
   state.panelId=null; state.draft=null; state.pvOriginal=null; state.pnDeleteLid=null; state.aiConfirm=null; state.panelCtx=null;
-  render(); // 背面の車両コスト表・内訳一覧を更新（変更履歴は確定／内訳を閉じる時に記録）
-  toast("内訳を保存しました");
+  render(); // 背面の車両コスト表・内訳一覧を更新（確定は「編集を完了する」で行う）
+  toast("内訳に反映しました（「編集を完了する」で確定）");
 }
-/* 「編集を完了する」：内訳での編集を最終確定（変更履歴に記録）して内訳を閉じる */
+/* 「編集を完了する」：編集内容の確認モーダルを表示（確定はモーダルの確定ボタンで） */
 function vehDocsFinalize(){
-  const dirty=state.vehDocsDirty;
-  closeVehDocs(); // vehDocsCommit で差分を変更履歴に記録し、内訳を閉じる
-  if(dirty) toast("編集内容を確定しました");
+  if(!state.vehDocsDirty){ clearVehDocsState(); return; }
+  state.vehDocsFinalizeConfirm=true; renderOverlay();
+}
+function vehDocsCancelFinalize(){ state.vehDocsFinalizeConfirm=false; renderOverlay(); }
+/* 確認モーダルで「確定」：変更履歴に記録して内訳を確定・クローズ */
+function vehDocsConfirmFinalize(){
+  vehDocsCommit(); // 差分を変更履歴に記録（実データは確定済みのまま保持）
+  clearVehDocsState();
+  toast("編集内容を確定しました");
+}
+/* 破棄確認で「保存せずに閉じる」：退避データへ復元（編集を破棄）して閉じる */
+function vehDocsConfirmDiscard(){
+  vehDocsRestoreData();
+  clearVehDocsState();
+  toast("編集内容を破棄しました");
+}
+function vehDocsCancelDiscard(){ state.vehDocsDiscardConfirm=false; renderOverlay(); }
+/* 編集破棄の確認モーダル（×・背景で閉じようとした時） */
+function renderVehDocsDiscardConfirm(){
+  if(!state.vehDocsDiscardConfirm) return "";
+  return `<div class="ovl anim" style="z-index:80" onclick="if(event.target===this)vehDocsCancelDiscard()"><div class="modal" style="width:min(460px,100%)">
+    <div class="m-head"><span class="t">${I.alert("#B87514",18)} 保存せずに閉じますか？</span>
+      <button class="x" onclick="vehDocsCancelDiscard()">${I.x("#5A6472",18)}</button></div>
+    <div class="m-body">
+      <p style="margin:0 0 13px;font-size:13.5px;color:var(--ink)">「編集を完了する」を押していないため、<b>編集内容は保存されません</b>がよろしいですか？</p>
+      <div class="ce-warn"><div><div class="ce-q">このまま閉じると、この内訳で行った編集はすべて破棄されます。</div></div></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn-cancel" onclick="vehDocsCancelDiscard()">編集に戻る</button>
+      <button class="btn-danger" onclick="vehDocsConfirmDiscard()">保存せずに閉じる</button>
+    </div>
+  </div></div>`;
+}
+/* 編集内容の確認モーダル（「編集を完了する」押下時） */
+function renderVehDocsFinalizeConfirm(){
+  if(!state.vehDocsFinalizeConfirm) return "";
+  const plate=state.vehDocsMeta?`<span class="plate" style="margin-right:8px">${esc(state.vehDocsMeta.target)}</span>`:"";
+  const diff=vehDocsDiff();
+  const rows = diff.length ? diff.map(d=>{
+    const doc=docs.find(x=>x.id===d.docId);
+    return `<div class="ce-row changed"><span class="ce-tag">✎ 変更</span><div class="ce-body"><b>${esc(d.l.item||"（項目未設定）")}</b>${doc?`<span class="ce-sub">${esc(doc.name)}</span>`:""}
+      <div class="ce-fields">${d.fields.map(f=>`<span class="ce-f">${esc(f[0])}：<span class="old">${esc(f[1])}</span> → <span class="new">${esc(f[2])}</span></span>`).join("")}</div></div></div>`;
+  }).join("") : `<div class="ce-empty">変更された項目はありません。</div>`;
+  return `<div class="ovl anim" style="z-index:80" onclick="if(event.target===this)vehDocsCancelFinalize()"><div class="modal modal-wide">
+    <div class="m-head"><span class="t">${plate}編集内容の確認</span>
+      <button class="x" onclick="vehDocsCancelFinalize()">${I.x("#5A6472",18)}</button></div>
+    <div class="m-body veh-edit-body">
+      <div class="ce-warn">${I.alert("#B87514",18)}<div><div class="ce-q">以下の内容で編集を確定しますがよろしいですか？</div>
+        <div class="ce-note">確定すると車両コストに反映され、変更履歴に記録されます。</div></div></div>
+      <div class="ce-list">${rows}</div>
+    </div>
+    <div class="m-foot">
+      <button class="btn-cancel" onclick="vehDocsCancelFinalize()">戻る</button>
+      <button class="btn-green" onclick="vehDocsConfirmFinalize()">${I.check("#fff",14,3)} 編集を確定する</button>
+    </div>
+  </div></div>`;
 }
 /* ───── 車両分析サイドパネル ───── */
 function _hash(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
@@ -5567,6 +5652,8 @@ function renderOverlay(){
   else if(state.vehEditKey) h=renderVehEditModal();
   else if(state.masterEdit) h=renderMasterEditModal();
   else if(state.costCsv) h=renderCostCsvModal();
+  if(state.vehDocsDiscardConfirm) h+=renderVehDocsDiscardConfirm(); // 内訳：保存せずに閉じる確認
+  if(state.vehDocsFinalizeConfirm) h+=renderVehDocsFinalizeConfirm(); // 内訳：編集確定の確認
   if(state.reflectConfirm) h+=renderReflectConfirm(); // 既存オーバーレイの上に確認モーダルを重ねる
   if(state.enterConfirm) h+=renderEnterConfirm();
   if(state.officeConfirm) h+=renderOfficeConfirm();
