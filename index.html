@@ -941,7 +941,23 @@
   .vd-hl .vd-in{border-color:var(--amber)}
   /* ───── 期間絞り込みカレンダー ───── */
   .veh-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-  .vf-l{font-size:11.5px;font-weight:800;color:var(--inkSoft);letter-spacing:.3px}
+  .vf-l{font-size:11.5px;font-weight:800;color:var(--inkSoft);letter-spacing:.3px;display:inline-flex;align-items:center;gap:4px}
+  /* 年間一覧 */
+  .annual-filters{flex-direction:column;align-items:stretch;gap:10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .annual-fgroup{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .annual-fgroup .vf-l{min-width:108px}
+  .annual-add{max-width:240px;padding:6px 9px;font-size:12.5px}
+  .annual-max{font-size:11.5px;color:var(--inkSoft);background:#EEF0F3;border-radius:999px;padding:3px 10px;font-weight:700}
+  .annual-period-lab{font-weight:800;font-size:13px;color:var(--ink);font-family:var(--mono);min-width:200px;text-align:center}
+  .annual-card{margin-bottom:16px}
+  .annual-head{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--lineSoft)}
+  .annual-sub{font-size:12.5px;color:var(--inkSoft)}
+  .annual-tbl thead th{background:#F3F5F2;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:11px;font-weight:800}
+  .annual-tbl th.annual-col{white-space:nowrap;text-align:right;top:auto}
+  .annual-tbl tbody tr.annual-foot td{background:#F3F5F2;font-weight:800;border-top:2px solid var(--line)}
+  .annual-tbl td.total{font-family:var(--mono);font-weight:800}
+  .annual-tbl td.r,.annual-tbl th.r{text-align:right}
+  .annual-tbl td{padding:8px 11px;font-size:12px}
   .vcal-wrap{position:relative;display:inline-flex}
   .vcal-field{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:6px 11px;font-size:12.5px;font-weight:700;color:var(--ink);cursor:pointer}
   .vcal-field:hover,.vcal-field.open{border-color:var(--green)}
@@ -2142,6 +2158,7 @@ let state={
   vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, vehDocsDirty:false,
   vehDocsDiscardConfirm:false, vehDocsFinalizeConfirm:false, _vehDocsBackup:null, vehDocsScope:null, vehDocsExport:null, vehDocsSelected:new Set(), panelCtx:null,
   siteTrash:new Set(), siteTrashView:false,
+  annualVehs:[], annualSites:[], annualEndYM:"2026-06", _annualInited:false,
   vehPanel:null, vehChartCat:null, vehChartGran:"month", vehTlExpanded:false,
   vehTrash:new Set(), vehTrashView:false, vehTrashAction:null,
   changelogOpen:false, changelogSeenCount:0, vehEditHighlight:null,
@@ -4772,13 +4789,16 @@ function alertDispatch(id){
 }
 
 function renderVehicles(){
+  const T=state.vehTab;
+  const isMonitor=T!=="individual"&&T!=="sites"&&T!=="annual"&&T!=="inventory";
   const tabs=`<div class="upl-tabs" style="margin-bottom:18px">
-    <button class="upl-tab ${state.vehTab!=="individual"&&state.vehTab!=="sites"?"active":""}" onclick="setVehTab('monitor')">コストモニター</button>
-    <button class="upl-tab ${state.vehTab==="individual"?"active":""}" onclick="setVehTab('individual')">車両コスト</button>
-    <button class="upl-tab ${state.vehTab==="sites"?"active":""}" onclick="setVehTab('sites')">拠点コスト</button>
-    <button class="upl-tab ${state.vehTab==="inventory"?"active":""}" onclick="setVehTab('inventory')">在庫管理</button>
+    <button class="upl-tab ${isMonitor?"active":""}" onclick="setVehTab('monitor')">コストモニター</button>
+    <button class="upl-tab ${T==="individual"?"active":""}" onclick="setVehTab('individual')">車両コスト</button>
+    <button class="upl-tab ${T==="sites"?"active":""}" onclick="setVehTab('sites')">拠点コスト</button>
+    <button class="upl-tab ${T==="annual"?"active":""}" onclick="setVehTab('annual')">年間一覧</button>
+    <button class="upl-tab ${T==="inventory"?"active":""}" onclick="setVehTab('inventory')">在庫管理</button>
   </div>`;
-  return tabs+(state.vehTab==="individual"?renderVehIndividual():state.vehTab==="sites"?renderVehSites():state.vehTab==="inventory"?renderInventory():renderVehMonitor());
+  return tabs+(T==="individual"?renderVehIndividual():T==="sites"?renderVehSites():T==="annual"?renderVehAnnual():T==="inventory"?renderInventory():renderVehMonitor());
 }
 /* ───── コストモニタータブ：全車両（ゴミ箱を除く）のコスト動向サマリー。絞り込み・ゴミ箱の影響を受けない。 ───── */
 /* ───── 異常検知：各対象を自身の過去で判定（①スパイク ②トレンド ③構成比＋補正） ───── */
@@ -5175,6 +5195,112 @@ function renderVehSites(){
     </thead>
     <tbody>${rows}</tbody></table></div></div>`;
   return head+filterBar+costCsvBar('site')+table;
+}
+/* ───── 年間一覧タブ：車両／拠点ごとに、原価項目を横軸・月（12ヶ月）を縦軸にした年間コスト表 ───── */
+/* 表示する12ヶ月（annualEndYM を末尾に古い順） */
+function annualMonths(){
+  const [ey,em]=state.annualEndYM.split("-").map(Number);
+  const out=[];
+  for(let i=11;i>=0;i--){ const d=new Date(ey,em-1-i,1); const y=d.getFullYear(),mo=d.getMonth()+1;
+    out.push({ym:`${y}-${_pad2(mo)}`, label:`${y}年${mo}月`}); }
+  return out;
+}
+function annualShiftPeriod(delta){ const [y,m]=state.annualEndYM.split("-").map(Number); const d=new Date(y,m-1+delta,1); state.annualEndYM=`${d.getFullYear()}-${_pad2(d.getMonth()+1)}`; render(); }
+function annualAddVeh(key){ if(!key)return; if(state.annualVehs.includes(key))return; if(state.annualVehs.length>=5){ toast("車両は最大5件まで選択できます"); render(); return; } state.annualVehs.push(key); render(); }
+function annualRemoveVeh(key){ state.annualVehs=state.annualVehs.filter(k=>k!==key); render(); }
+function annualAddSite(o){ if(!o)return; if(state.annualSites.includes(o))return; if(state.annualSites.length>=5){ toast("拠点は最大5件まで選択できます"); render(); return; } state.annualSites.push(o); render(); }
+function annualRemoveSite(o){ state.annualSites=state.annualSites.filter(x=>x!==o); render(); }
+/* 12ヶ月分の明細を1パスで集計：veh[key].ym[ym][komoku] / site[office][ym][komoku] */
+function annualAggregate(months){
+  const ymSet=new Set(months.map(m=>m.ym));
+  const veh={}, site={};
+  const adjIdx=new Map(); ADJUSTMENTS.forEach(a=>{ if(a.type==="override") adjIdx.set(adjKey(a.docId,a.lid),a); });
+  const addV=(key,target,ym,km,amt)=>{ const e=veh[key]||(veh[key]={target,ym:{}}); const mm=e.ym[ym]||(e.ym[ym]={}); mm[km]=(mm[km]||0)+amt; };
+  const addS=(office,ym,km,amt)=>{ const e=site[office]||(site[office]={}); const mm=e[ym]||(e[ym]={}); mm[km]=(mm[km]||0)+amt; };
+  docs.filter(d=>d.status==="連携済み"&&!d.deleted).forEach(d=>{
+    linesOf(d.id).forEach(l=>{
+      const eff=effDocLine(l,d.id,adjIdx);
+      const ym=(eff.inspectedAt||"").slice(0,7); if(!ymSet.has(ym)) return;
+      const km=lineKomoku(eff); const idx=KOMOKU_INDEX[km]; const amt=+eff.amount||0; if(!km) return;
+      if(idx&&idx.scope==="拠点"){ addS(d.category||"未分類",ym,km,amt); }
+      else { const vid=l.vehicleId||resolveVehicleId(l.plate); const mv=vehicleById(vid);
+        const target=mv?mv.plate:(l.plate||"未設定"); const key=vid||(normPlate(l.plate)?"U:"+normPlate(l.plate):"未設定");
+        addV(key,target,ym,km,amt); }
+    });
+  });
+  state.manualLines.forEach(m=>{ const ym=(m.date||"").slice(0,7); if(!ymSet.has(ym))return; const km=lineKomoku(m); if(!km)return; const idx=KOMOKU_INDEX[km]; const amt=+m.amount||0;
+    if(idx&&idx.scope==="拠点") addS(m.office||"未分類",ym,km,amt); else addV(m.vkey,m.target,ym,km,amt); });
+  return {veh,site};
+}
+/* 1エンティティ（車両/拠点）の年間表 */
+function annualTable(scope,id,label,months,agg){
+  const isV=scope==="vehicle";
+  const model=isV?VEHICLE_COST_MODEL:SITE_COST_MODEL;
+  const data=isV?((agg.veh[id]||{}).ym||{}):(agg.site[id]||{});
+  const cell=v=>v>0?yen(v):`<span style="color:var(--inkFaint)">—</span>`;
+  const colTotals={}; let grand=0;
+  const rowData=months.map(mo=>{ const by=data[mo.ym]||{}; let tot=0; Object.keys(by).forEach(k=>tot+=by[k]||0);
+    model.forEach(g=>{ colTotals[g.komoku]=(colTotals[g.komoku]||0)+(by[g.komoku]||0); }); grand+=tot; return {mo,by,tot}; });
+  const headCols=model.map(g=>{ const cs=bunruiStyle(g.bunrui); return `<th class="annual-col" style="color:${cs.fg}">${esc(g.komoku)}</th>`; }).join("");
+  const bodyRows=rowData.map(({mo,by,tot})=>`<tr>
+    <td class="sticky-c sticky-c1" style="white-space:nowrap"><b>${mo.label}</b></td>
+    <td class="r total">${cell(tot)}</td>
+    ${model.map(g=>`<td class="r">${cell(by[g.komoku]||0)}</td>`).join("")}
+  </tr>`).join("");
+  const footer=`<tr class="annual-foot">
+    <td class="sticky-c sticky-c1">年間合計</td>
+    <td class="r total">${yen(grand)}</td>
+    ${model.map(g=>`<td class="r">${cell(colTotals[g.komoku]||0)}</td>`).join("")}</tr>`;
+  const chip=isV?`<span class="plate">${esc(label)}</span>`:`<span class="office-chip">${esc(label)}</span>`;
+  return `<div class="veh-card annual-card">
+    <div class="annual-head">${chip}<span class="annual-sub">${isV?"車両":"拠点"}・年間合計 <b>${yen(grand)}</b></span></div>
+    <div class="tscroll"><table class="vt vt-metrics annual-tbl">
+      <thead><tr><th class="sticky-c sticky-c1">月</th><th class="r">月合計</th>${headCols}</tr></thead>
+      <tbody>${bodyRows}${footer}</tbody></table></div>
+  </div>`;
+}
+function renderVehAnnual(){
+  const allVehs=buildVehicles("all").filter(v=>!state.vehTrash.has(v.key)).sort((a,b)=>b.total-a.total);
+  // 初回は先頭車両を1台プリセット
+  if(!state._annualInited){ state._annualInited=true; if(state.annualVehs.length===0&&state.annualSites.length===0&&allVehs[0]) state.annualVehs=[allVehs[0].key]; }
+  const months=annualMonths();
+  const agg=annualAggregate(months);
+  const first=months[0], last=months[11];
+  const head=`<div class="pagehead pagehead-veh">
+    <div><p>各車両・拠点ごとに、<b>原価項目を横軸</b>・<b>月（12ヶ月）を縦軸</b>にした年間のコスト一覧です。車両・拠点（各最大5件）と期間で絞り込めます。</p></div>
+  </div>`;
+  // 車両選択
+  const vehChips=state.annualVehs.map(key=>{ const v=allVehs.find(x=>x.key===key); return `<span class="set-chip">${esc(v?v.target:key)}<button title="外す" onclick="annualRemoveVeh('${esc(key)}')">×</button></span>`; }).join("");
+  const vehAvail=allVehs.filter(v=>!state.annualVehs.includes(v.key));
+  const vehAdd=state.annualVehs.length>=5
+    ? `<span class="annual-max">最大5車両</span>`
+    : `<select class="in annual-add" onchange="annualAddVeh(this.value)"><option value="">＋ 車両を追加</option>${vehAvail.map(v=>`<option value="${esc(v.key)}">${esc(v.target)}</option>`).join("")}</select>`;
+  // 拠点選択
+  const siteChips=state.annualSites.map(o=>`<span class="set-chip">${esc(o)}<button title="外す" onclick="annualRemoveSite('${esc(o)}')">×</button></span>`).join("");
+  const siteAvail=CATEGORIES.filter(o=>!state.siteTrash.has(o)&&!state.annualSites.includes(o));
+  const siteAdd=state.annualSites.length>=5
+    ? `<span class="annual-max">最大5拠点</span>`
+    : `<select class="in annual-add" onchange="annualAddSite(this.value)"><option value="">＋ 拠点を追加</option>${siteAvail.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>`;
+  const periodCtrl=`<div class="annual-fgroup"><span class="vf-l">${I.boxes?"":""}期間</span>
+    <button class="pg-btn" onclick="annualShiftPeriod(-12)" title="1年前へ">‹‹</button>
+    <button class="pg-btn" onclick="annualShiftPeriod(-1)" title="1ヶ月前へ">‹</button>
+    <span class="annual-period-lab">${first.label} 〜 ${last.label}</span>
+    <button class="pg-btn" onclick="annualShiftPeriod(1)" title="1ヶ月後へ">›</button>
+    <button class="pg-btn" onclick="annualShiftPeriod(12)" title="1年後へ">››</button></div>`;
+  const filterBar=`<div class="veh-filters annual-filters">
+    <div class="annual-fgroup"><span class="vf-l">${I.car?I.car("#5A6472",14):""} 車両（最大5）</span>${vehChips}${vehAdd}</div>
+    <div class="annual-fgroup"><span class="vf-l">${I.boxes("#5A6472",14)} 拠点（最大5）</span>${siteChips}${siteAdd}</div>
+    ${periodCtrl}
+  </div>`;
+  const blocks=[];
+  state.annualVehs.forEach(key=>{ const v=allVehs.find(x=>x.key===key); blocks.push(annualTable("vehicle",key,(v?v.target:((agg.veh[key]||{}).target||key)),months,agg)); });
+  state.annualSites.forEach(o=>{ blocks.push(annualTable("site",o,o,months,agg)); });
+  const body=(state.annualVehs.length+state.annualSites.length)===0
+    ? `<div class="veh-card"><div class="empty">${I.truckN("#9AA3AD",40)}
+        <div class="et">車両・拠点を選択してください</div>
+        <div class="es">上の絞り込みから車両（最大5）・拠点（最大5）を選ぶと、年間のコスト一覧を表示します。</div></div></div>`
+    : blocks.join("");
+  return head+filterBar+body;
 }
 function toggleVeh(k){if(state.vehExpanded.has(k))state.vehExpanded.delete(k);else state.vehExpanded.add(k);render();}
 function setVehCategoryFilter(v){ state.vehCategoryFilter=v; state.vehPage=1; render(); }
