@@ -418,6 +418,10 @@
   .total-box .v{font-family:var(--mono);font-weight:800;font-size:var(--fs-key);color:var(--ink)}
 
   .line-card{border:1px solid var(--line);border-radius:10px;padding:12px 13px;margin-bottom:var(--space-det);background:var(--panel)}
+  /* 内訳：別車両の明細（編集不可）。淡色＋点線で他車両であることを明示 */
+  .line-card.lc-other{background:#F4F5F7;border-style:dashed;opacity:.78}
+  .line-card.lc-other .in,.line-card.lc-other .komoku-ref{background:#EEF0F3}
+  .lc-other-tag{font-size:10.5px;font-weight:800;color:var(--inkSoft);background:#E4E7EB;border:1px solid var(--line);border-radius:999px;padding:2px 9px}
   .lc-head{display:flex;align-items:center;gap:8px;margin-bottom:9px}
   .lc-no{font-size:11px;font-weight:800;color:var(--inkSoft);font-family:var(--mono)}
   .match-badge{margin-left:auto}
@@ -1589,7 +1593,7 @@ function subcatFieldHTML(l){ const sub=resolveRepairSubcat(l.cat,l.item); if(!su
 /* 連携プランに載せる内訳タグ（例 " [内訳: tire/タイヤ]"）。cat+item から都度導出 */
 function subcatTag(l){ const s=l.subCat||resolveSubcat(l.cat,l.item); const parts=[]; if(s) parts.push(`内訳: ${s}/${subcatLabel(s)}`); if(l.liters!=null&&l.liters!=="") parts.push(`${l.liters}L`); if(l.unitPrice!=null&&l.unitPrice!=="") parts.push(`${l.unitPrice}円/L`); return parts.length?` [${parts.join(" | ")}]`:""; }
 /* 給油量(L)・単価(円/L) の手入力フィールドHTML（燃料費のみ表示） */
-function fuelFieldsHTML(l){ if(l.cat!==FUEL_CAT) return ""; const ro=(state.draft&&state.draft.status==="連携済み")?"readonly":""; return `<div class="grid2">
+function fuelFieldsHTML(l){ if(l.cat!==FUEL_CAT) return ""; const ro=lineEditDisabled(l)?"readonly":""; return `<div class="grid2">
   <div class="fld"><label>給油量（L）</label><input class="in mono" ${ro} inputmode="decimal" placeholder="（任意）" value="${l.liters==null?"":esc(l.liters)}" oninput="pnLine(${l.lid},'liters',this.value)" autocomplete="off"></div>
   <div class="fld"><label>単価（円/L）</label><input class="in mono" ${ro} inputmode="decimal" placeholder="（任意）" value="${l.unitPrice==null?"":esc(l.unitPrice)}" oninput="pnLine(${l.lid},'unitPrice',this.value)" autocomplete="off"></div>
 </div>`; }
@@ -2132,7 +2136,7 @@ let state={
   vehExpanded:new Set(),
   vehEditKey:null, vehEditMeta:null, vehEditConfirm:false, vehEditSnapshot:null, vehViewDocId:null, vehViewLid:null,
   vehDocsKey:null, vehDocsMeta:null, vehDocsKomoku:"all", vehDocsStart:null, vehDocsEnd:null, vehDocsPage:1, vehDocsPerPage:20,
-  vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, panelCtx:null,
+  vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, vehDocsDirty:false, panelCtx:null,
   vehPanel:null, vehChartCat:null, vehChartGran:"month", vehTlExpanded:false,
   vehTrash:new Set(), vehTrashView:false, vehTrashAction:null,
   changelogOpen:false, changelogSeenCount:0, vehEditHighlight:null,
@@ -3059,18 +3063,22 @@ function renderPanel(){
     <span class="lg lg-g">項目</span><span class="lg lg-r">対象車両</span><span class="lg lg-b">金額</span></div>`;
 
   const cand=state.draft._ocr||[];
-  const ro=isReflected?"readonly":"", dis=isReflected?"disabled":"";
   const lineCards=d.lines.map((l,idx)=>{
+    // 明細単位の編集可否：内訳では対象車番以外を常に編集不可、通常パネルでは連携済みを編集不可
+    const lro=lineEditDisabled(l);
+    const ro=lro?"readonly":"", dis=lro?"disabled":"";
+    const otherVeh=fromVeh && !lineBelongsToVehDocsTarget(l); // 内訳：別車両の明細
     const targetFld=`<div class="fld"><label>対象車両（車番）</label>
            <div class="sug-combo">
              <input id="pn-plate-${l.lid}" class="in mono b-r" ${ro} value="${esc(l.plate)}" placeholder="（対象なし）" autocomplete="off" oninput="pnPlateInput(${l.lid},this.value)">
-             ${!isReflected?`<div class="sug-pop" id="pn-sug-${l.lid}">${plateSuggestHTML(l.lid,l.plate)}</div>`:''}
+             ${!lro?`<div class="sug-pop" id="pn-sug-${l.lid}">${plateSuggestHTML(l.lid,l.plate)}</div>`:''}
            </div></div>`;
-    return `<div class="line-card">
+    return `<div class="line-card${otherVeh?" lc-other":""}">
       <div class="lc-head"><span class="lc-no">明細 ${idx+1}</span>
         <span class="match-badge" id="pn-badge-${l.lid}">${matchBadge(l)}</span>
-        ${isReflected?"":`<button class="lc-del" title="この明細を削除" onclick="pnAskDeleteLine(${l.lid})">${I.x("#B23A2E",15)}</button>`}</div>
-      <div class="fld" id="pn-item-wrap-${l.lid}"><label>項目（OCR判定対象・部分一致で候補を上位表示）</label>${genbaSelectHTML(l.lid,l,isReflected)}${readHintHTML(l)}</div>
+        ${otherVeh?`<span class="lc-other-tag" title="この車両（${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}）以外の明細のため編集できません">他車両の明細・編集不可</span>`:""}
+        ${lro?"":`<button class="lc-del" title="この明細を削除" onclick="pnAskDeleteLine(${l.lid})">${I.x("#B23A2E",15)}</button>`}</div>
+      <div class="fld" id="pn-item-wrap-${l.lid}"><label>項目（OCR判定対象・部分一致で候補を上位表示）</label>${genbaSelectHTML(l.lid,l,lro)}${readHintHTML(l)}</div>
       <div class="grid2">
         <div class="fld"><label>原価項目（自動判定・参考値） ${catHelp()}</label>
           ${komokuRefHTML(l)}
@@ -3084,15 +3092,17 @@ function renderPanel(){
           <div class="amt-combo">
             <input id="pn-amt-${l.lid}" class="in mono b-b" ${ro} value="${(+l.amount).toLocaleString('ja-JP')}" oninput="pnLine(${l.lid},'amount',this.value)" autocomplete="off">
             ${cand.length?`<span class="amt-ck" id="pn-amtck-${l.lid}" style="${cand.includes(+l.amount)?'':'display:none'}">${I.check('#177D58',15,3)}</span>`:''}
-            ${(!isReflected&&cand.length)?`<div class="amt-pop"><div class="amt-pop-h">ファイルから読み取られた金額の一覧</div>${cand.map(a=>`<div class="amt-opt ${a===+l.amount?'sel':''}" onmousedown="pnPickAmount(${l.lid},${a})">${a.toLocaleString('ja-JP')}</div>`).join("")}</div>`:''}
+            ${(!lro&&cand.length)?`<div class="amt-pop"><div class="amt-pop-h">ファイルから読み取られた金額の一覧</div>${cand.map(a=>`<div class="amt-opt ${a===+l.amount?'sel':''}" onmousedown="pnPickAmount(${l.lid},${a})">${a.toLocaleString('ja-JP')}</div>`).join("")}</div>`:''}
           </div></div>
       </div>
     </div>`;
   }).join("");
 
-  const note=`<div class="pn-foot-note">${I.db("#B87514",16)}<span>対象車両がロジポケに登録済みかは、上のバッジで自動判定しています（既存／新規／要確認）。<b>「データ連携する」</b>と、新規車両はマスタ作成、既存車両はコストを積み上げます。</span></div>`;
+  const note=fromVeh
+    ? `<div class="pn-foot-note">${I.db("#B87514",16)}<span>この車両（<b>${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}</b>）の明細のみ編集できます。<b>原価項目は項目から自動判定される参考値</b>のため変更できません。「完了」で保存し、内訳一覧の<b>「編集を完了する」</b>で最終確定してください。</span></div>`
+    : `<div class="pn-foot-note">${I.db("#B87514",16)}<span>対象車両がロジポケに登録済みかは、上のバッジで自動判定しています（既存／新規／要確認）。<b>「データ連携する」</b>と、新規車両はマスタ作成、既存車両はコストを積み上げます。</span></div>`;
 
-  const addLineBtn=isReflected?"":`<button class="vd-add" onclick="pnAddLine()">${I.plus("#0E5A40",14)} 明細を追加</button>`;
+  const addLineBtn=(isReflected||fromVeh)?"":`<button class="vd-add" onclick="pnAddLine()">${I.plus("#0E5A40",14)} 明細を追加</button>`;
   const left=`<div class="pn-left">${stepper}${fields}
     <div class="pn-sec">明細 <span class="ct">${d.lines.length}件</span></div>
     ${legend}${lineCards}${addLineBtn}${note}</div>`;
@@ -3802,7 +3812,7 @@ function openVehDocs(key,kind,target){
   state.vehDocsKey=key; state.vehDocsMeta={key,kind,target};
   state.vehDocsKomoku="all";
   const r=vehDocsDefaultRange(); state.vehDocsStart=r.start; state.vehDocsEnd=r.end;
-  state.vehDocsPage=1; state.vehDocsCalOpen=false;
+  state.vehDocsPage=1; state.vehDocsCalOpen=false; state.vehDocsDirty=false;
   const v=buildVehicles("all").find(x=>x.key===key);
   state.vehDocsSnapshot = v ? v.lines.filter(l=>l.src==="doc").map(l=>({lid:String(l.lid),docId:l.docId,item:l.item,komoku:lineKomoku(l),date:l.date,amount:+l.amount})) : [];
   renderOverlay();
@@ -3965,11 +3975,15 @@ function renderVehDocsModal(){
     body=`<p class="count-line">表示中 <b>${list.length}</b> 件${state.vehDocsKomoku!=="all"?`<span class="filter-summary">原価項目：${esc(state.vehDocsKomoku)}<button class="fs-clear" onclick="setVehDocsKomoku('all')">クリア</button></span>`:""}</p>${table}`;
   }
 
+  const finalizeBtn=state.vehDocsDirty
+    ? `<button class="btn-green" style="margin-left:auto;margin-right:10px" onclick="vehDocsFinalize()">${I.check("#fff",14,3)} 編集を完了する</button>`
+    : "";
   return `<div class="ovl ${state._ovFresh?'anim':''}" onclick="if(event.target===this)closeVehDocs()"><div class="modal modal-docs">
     <div class="m-head"><span class="t">${titlePlate}の内訳（書類一覧）</span>
+      ${finalizeBtn}
       <button class="x" onclick="closeVehDocs()">${I.x("#5A6472",18)}</button></div>
     <div class="m-body">
-      <div class="vd-sub" style="margin:0 0 12px">この車両に紐づく連携済み書類を一覧表示します。<b>原価項目</b>・<b>発生期間</b>で絞り込めます（既定＝当月＋先月）。行をクリックすると右側のパネルで内容を編集できます。</div>
+      <div class="vd-sub" style="margin:0 0 12px">この車両に紐づく連携済み書類を一覧表示します。<b>原価項目</b>・<b>発生期間</b>で絞り込めます（既定＝当月＋先月）。行をクリックすると右側のパネルで内容を編集できます。${state.vehDocsDirty?`<b style="color:var(--greenDark)">　編集があります。右上の「編集を完了する」で確定してください。</b>`:""}</div>
       ${filterBar}
       ${body}
     </div>
@@ -4001,7 +4015,19 @@ function panelDocList(){
   if(state.panelCtx==="vehdocs" && state.vehDocsKey) return vehDocsList().map(x=>x.d);
   return visibleDocs();
 }
-/* 「完了」：ドラフトを実データへ保存し、内訳一覧へ戻る（連携済みでも明細を直接更新） */
+/* この明細が内訳パネルの対象車番（=この車両）に属するか。属さない明細は内訳では編集不可。 */
+function lineBelongsToVehDocsTarget(l){
+  if(state.panelCtx!=="vehdocs"||!state.vehDocsMeta) return true;
+  const vid=(l&&l.vehicleId)||resolveVehicleId(l&&l.plate);
+  const key=vid||((l&&normPlate(l.plate))?"U:"+normPlate(l.plate):"未設定");
+  return key===state.vehDocsMeta.key;
+}
+/* 明細の編集可否：内訳パネルでは対象車番以外を常に編集不可。通常パネルでは連携済みを編集不可。 */
+function lineEditDisabled(l){
+  if(state.panelCtx==="vehdocs") return !lineBelongsToVehDocsTarget(l);
+  return !!(state.draft && state.draft.status==="連携済み");
+}
+/* 「完了」：ドラフトを実データへ保存し、内訳一覧へ戻る（連携済みでも対象車番の明細を直接更新） */
 function vehDocCompleteSave(){
   const d=docs.find(x=>x.id===state.panelId);
   if(d&&state.draft){
@@ -4009,10 +4035,17 @@ function vehDocCompleteSave(){
     writeLines(d.id, state.draft.lines);
     // 連携済み明細を直接更新したため、当該書類の override 調整は破棄（二重適用の防止）
     for(let i=ADJUSTMENTS.length-1;i>=0;i--){ if(ADJUSTMENTS[i].docId===d.id) ADJUSTMENTS.splice(i,1); }
+    state.vehDocsDirty=true; // 内訳一覧に「編集を完了する」ボタンを表示
   }
   state.panelId=null; state.draft=null; state.pvOriginal=null; state.pnDeleteLid=null; state.aiConfirm=null; state.panelCtx=null;
-  render(); // 背面の車両コスト表・内訳一覧を更新（変更履歴は内訳を閉じる時に記録）
+  render(); // 背面の車両コスト表・内訳一覧を更新（変更履歴は確定／内訳を閉じる時に記録）
   toast("内訳を保存しました");
+}
+/* 「編集を完了する」：内訳での編集を最終確定（変更履歴に記録）して内訳を閉じる */
+function vehDocsFinalize(){
+  const dirty=state.vehDocsDirty;
+  closeVehDocs(); // vehDocsCommit で差分を変更履歴に記録し、内訳を閉じる
+  if(dirty) toast("編集内容を確定しました");
 }
 /* ───── 車両分析サイドパネル ───── */
 function _hash(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
