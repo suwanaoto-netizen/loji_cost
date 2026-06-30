@@ -3906,7 +3906,13 @@ function vehDocsCalPickMonth(delta){ const {y,m}=_ymParts(state.vehDocsCalYM); c
 function vehDocsCalPickDay(iso){
   const s=state.vehDocsStart, e=state.vehDocsEnd;
   if(!s || (s&&e)){ state.vehDocsStart=iso; state.vehDocsEnd=null; }
-  else { if(iso<s){ state.vehDocsEnd=s; state.vehDocsStart=iso; } else { state.vehDocsEnd=iso; } state.vehDocsCalOpen=false; }
+  else {
+    let a=iso<s?{start:iso,end:s}:{start:s,end:iso};
+    // 期間は最大1年。超える場合は開始日を終了日の1年前に丸める
+    const ed=new Date(a.end), cap=new Date(ed.getFullYear()-1,ed.getMonth(),ed.getDate()+1);
+    if(new Date(a.start)<cap){ a.start=`${cap.getFullYear()}-${_pad2(cap.getMonth()+1)}-${_pad2(cap.getDate())}`; toast("発生期間は最大1年です。開始日を調整しました"); }
+    state.vehDocsStart=a.start; state.vehDocsEnd=a.end; state.vehDocsCalOpen=false;
+  }
   state.vehDocsPage=1; renderOverlay();
 }
 function clearVehDocsCal(){ state.vehDocsStart=null; state.vehDocsEnd=null; state.vehDocsPage=1; renderOverlay(); }
@@ -3995,6 +4001,56 @@ function vehDocsKomokuList(){
   const set=new Set(); vehDocsTargetLines().forEach(l=>{ if(l.komoku) set.add(l.komoku); });
   return [...set].sort((a,b)=>{ const ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?999:ia)-(ib<0?999:ib); });
 }
+/* ───── 内訳「書類以外含む全項目編集」：期間（最大1年）のデータをCSVインポート互換形式で出力 ───── */
+/* 出力に適用する期間（最大1年）。範囲未指定なら end を当日とし直近1年。範囲が1年超なら開始日を1年前へ丸める。 */
+function vehDocsExportRange(){
+  let start=state.vehDocsStart, end=state.vehDocsEnd;
+  if(!end) end=_CAL_TODAY;
+  if(!start){ const e=new Date(end); start=`${e.getFullYear()-1}-${_pad2(e.getMonth()+1)}-${_pad2(e.getDate())}`; }
+  const e=new Date(end), cap=new Date(e.getFullYear()-1,e.getMonth(),e.getDate()+1);
+  const wasCapped=new Date(start)<cap;
+  if(wasCapped) start=`${cap.getFullYear()}-${_pad2(cap.getMonth()+1)}-${_pad2(cap.getDate())}`;
+  return {start,end,capped:wasCapped};
+}
+/* 期間に含まれる月（最大12ヶ月）の月初・月末 */
+function _vehDocsMonths(start,end){
+  const out=[]; let y=+start.slice(0,4), mo=+start.slice(5,7);
+  const ey=+end.slice(0,4), em=+end.slice(5,7); let guard=0;
+  while((y<ey||(y===ey&&mo<=em)) && guard++<13){
+    out.push({mStart:`${y}-${_pad2(mo)}-01`, mEnd:`${y}-${_pad2(mo)}-${_pad2(_daysIn(y,mo))}`});
+    mo++; if(mo>12){ mo=1; y++; }
+  }
+  return out;
+}
+/* 期間内の月次データを、コスト管理CSV（インポート互換）として出力。書類由来でない原価項目も列に含む。 */
+function vehDocsExportCsv(){
+  const m=state.vehDocsMeta; if(!m) return;
+  const isSite=vehDocsIsSite(); const scope=isSite?"site":"vehicle"; const sp=_costCsvScopeSpec(scope);
+  const headers=costCsvHeaders(scope);
+  const {start,end,capped}=vehDocsExportRange();
+  const months=_vehDocsMonths(start,end);
+  const office=isSite?m.office:vehCurrentOffice(m.key);
+  const rows=[];
+  months.forEach(mo=>{
+    const range={start:mo.mStart,end:mo.mEnd};
+    if(isSite){
+      const all=buildSites(range); const data=all[m.office]||{};
+      const tot=Object.keys(data).reduce((a,k)=>a+(data[k]||0),0); if(tot<=0) return;
+      const row=[m.office, mo.mStart];
+      siteMetrics(m.office,all).forEach(g=>g.metrics.forEach(mm=>{ if(mm.isSum)return; row.push(mm.na?"":mm.value); }));
+      rows.push(row);
+    } else {
+      const v=buildVehicles("all",range).find(x=>x.key===m.key); if(!v||v.total<=0) return;
+      const row=[m.target, mo.mStart, office];
+      vehicleMetrics(v).forEach(g=>g.metrics.forEach(mm=>{ if(mm.isSum)return; row.push(mm.na?"":mm.value); }));
+      rows.push(row);
+    }
+  });
+  const q=s=>`"${String(s==null?"":s).replace(/"/g,'""')}"`;
+  const text=headers.map(q).join(",")+"\r\n"+rows.map(r=>r.map(q).join(",")).join("\r\n");
+  _downloadCsv(text, `${sp.fname}_${String(m.target).replace(/\s+/g,"")}_${start}_${end}.csv`, true);
+  toast(`全項目CSVを出力しました（期間 ${start}〜${end}${capped?" ／最大1年に調整":""}・${rows.length}件）`);
+}
 function renderVehDocsModal(){
   const key=state.vehDocsKey; if(!key) return "";
   const m=state.vehDocsMeta||{key,kind:"単車",target:key};
@@ -4054,12 +4110,13 @@ function renderVehDocsModal(){
     body=`<p class="count-line">表示中 <b>${list.length}</b> 件${state.vehDocsKomoku!=="all"?`<span class="filter-summary">原価項目：${esc(state.vehDocsKomoku)}<button class="fs-clear" onclick="setVehDocsKomoku('all')">クリア</button></span>`:""}</p>${table}`;
   }
 
+  const exportBtn=`<button class="veh-edit-btn" style="margin-right:10px" onclick="vehDocsExportCsv()" title="絞り込みで指定した発生期間（最大1年）のデータを、ページのCSVインポートで取り込めるCSV（全原価項目の列を含む）で出力します">${I.download("#0E7A4B",13)} 書類以外含む全項目編集</button>`;
   const finalizeBtn=state.vehDocsDirty
     ? `<button class="btn-green" style="margin-right:12px" onclick="vehDocsFinalize()">${I.check("#fff",14,3)} 編集を完了する</button>`
     : "";
   return `<div class="ovl ${state._ovFresh?'anim':''}" onclick="if(event.target===this)closeVehDocs()"><div class="modal modal-docs">
     <div class="m-head"><span class="t" style="flex:1">${titlePlate}の内訳（書類一覧）</span>
-      ${finalizeBtn}
+      ${exportBtn}${finalizeBtn}
       <button class="x" onclick="closeVehDocs()">${I.x("#5A6472",18)}</button></div>
     <div class="m-body">
       <div class="vd-sub" style="margin:0 0 12px">${subj}に紐づく連携済み書類を一覧表示します。<b>原価項目</b>・<b>発生期間</b>で絞り込めます（既定＝当月＋先月）。行をクリックすると右側のパネルで内容を編集できます。${state.vehDocsDirty?`<b style="color:var(--greenDark)">　編集があります。右上の「編集を完了する」で確定してください。</b>`:""}</div>
