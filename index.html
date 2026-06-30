@@ -2139,7 +2139,7 @@ let state={
   vehEditKey:null, vehEditMeta:null, vehEditConfirm:false, vehEditSnapshot:null, vehViewDocId:null, vehViewLid:null,
   vehDocsKey:null, vehDocsMeta:null, vehDocsKomoku:"all", vehDocsStart:null, vehDocsEnd:null, vehDocsPage:1, vehDocsPerPage:20,
   vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, vehDocsDirty:false,
-  vehDocsDiscardConfirm:false, vehDocsFinalizeConfirm:false, _vehDocsBackup:null, vehDocsScope:null, panelCtx:null,
+  vehDocsDiscardConfirm:false, vehDocsFinalizeConfirm:false, _vehDocsBackup:null, vehDocsScope:null, vehDocsExport:null, panelCtx:null,
   siteTrash:new Set(), siteTrashView:false,
   vehPanel:null, vehChartCat:null, vehChartGran:"month", vehTlExpanded:false,
   vehTrash:new Set(), vehTrashView:false, vehTrashAction:null,
@@ -3860,7 +3860,7 @@ function vehDocsRestoreData(){
 function clearVehDocsState(){
   state.vehDocsKey=null; state.vehDocsMeta=null; state.vehDocsSnapshot=null; state.vehDocsScope=null;
   state.vehDocsCalOpen=false; state.vehDocsDirty=false;
-  state.vehDocsDiscardConfirm=false; state.vehDocsFinalizeConfirm=false; state._vehDocsBackup=null;
+  state.vehDocsDiscardConfirm=false; state.vehDocsFinalizeConfirm=false; state._vehDocsBackup=null; state.vehDocsExport=null;
   render();
 }
 /* 閉じる要求（×・背景）。未確定の編集があれば破棄確認、無ければそのまま閉じる */
@@ -4048,8 +4048,40 @@ function vehDocsExportCsv(){
   });
   const q=s=>`"${String(s==null?"":s).replace(/"/g,'""')}"`;
   const text=headers.map(q).join(",")+"\r\n"+rows.map(r=>r.map(q).join(",")).join("\r\n");
-  _downloadCsv(text, `${sp.fname}_${String(m.target).replace(/\s+/g,"")}_${start}_${end}.csv`, true);
+  const bom = !state.vehDocsExport || state.vehDocsExport.charset!=="utf8";
+  _downloadCsv(text, `${sp.fname}_${String(m.target).replace(/\s+/g,"")}_${start}_${end}.csv`, bom);
   toast(`全項目CSVを出力しました（期間 ${start}〜${end}${capped?" ／最大1年に調整":""}・${rows.length}件）`);
+  closeVehDocsExport();
+}
+/* 全項目CSV出力の確認モーダル（既存のCSVダウンロードと同様に、対象期間を確認してから出力） */
+function openVehDocsExport(){ if(!state.vehDocsMeta) return; state.vehDocsCalOpen=false; state.vehDocsExport={charset:"utf8bom"}; renderOverlay(); }
+function closeVehDocsExport(){ state.vehDocsExport=null; renderOverlay(); }
+function setVehDocsExportCharset(v){ if(state.vehDocsExport) state.vehDocsExport.charset=v; }
+function renderVehDocsExportModal(){
+  if(!state.vehDocsExport||!state.vehDocsMeta) return "";
+  const m=state.vehDocsMeta; const isSite=vehDocsIsSite();
+  const sp=_costCsvScopeSpec(isSite?"site":"vehicle");
+  const subj=isSite?"営業所":"車両";
+  const {start,end,capped}=vehDocsExportRange();
+  return `<div class="ovl anim" style="z-index:80" onclick="if(event.target===this)closeVehDocsExport()"><div class="modal" style="width:min(620px,100%)">
+    <div class="m-head"><span class="t">${I.download("#0E5A40",18)} 書類以外含む全項目編集（CSV出力）</span>
+      <button class="x" onclick="closeVehDocsExport()">${I.x("#5A6472",18)}</button></div>
+    <div class="m-body">
+      <p style="font-size:13px;margin:0 0 13px;line-height:1.7">ページの<b>「CSVインポート」</b>で取り込める形式（全原価項目の列を含む）で出力します。<b>書類由来でない項目</b>もCSV上で編集できます。下記の<b>対象期間</b>をご確認ください。</p>
+      <div class="ce-warn" style="background:var(--greenSoft);border-color:var(--greenLine)">${I.check("#0E5A40",18,2.6)}<div>
+        <div class="ce-q">対象：<b>${subj} ${esc(m.target)}</b></div>
+        <div class="ce-note">対象期間（発生日）：<b>${start} 〜 ${end}</b>　${capped?`<span style="color:var(--alert);font-weight:800">※ 絞り込みが1年を超えるため、最大1年に調整しました</span>`:`<span style="color:var(--inkSoft)">（適用される期間は最大1年です）</span>`}</div></div></div>
+      <div class="fld" style="margin-top:14px"><label>文字コード</label>
+        <select class="in" onchange="setVehDocsExportCharset(this.value)">
+          <option value="utf8bom">エクセル対応（UTF-8 BOM）</option>
+          <option value="utf8">UTF-8（BOMなし）</option>
+        </select></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn-ghost" onclick="closeVehDocsExport()">キャンセル</button>
+      <button class="btn-green" onclick="vehDocsExportCsv()">${I.download("#fff",14)} CSVダウンロード</button>
+    </div>
+  </div></div>`;
 }
 function renderVehDocsModal(){
   const key=state.vehDocsKey; if(!key) return "";
@@ -4110,7 +4142,7 @@ function renderVehDocsModal(){
     body=`<p class="count-line">表示中 <b>${list.length}</b> 件${state.vehDocsKomoku!=="all"?`<span class="filter-summary">原価項目：${esc(state.vehDocsKomoku)}<button class="fs-clear" onclick="setVehDocsKomoku('all')">クリア</button></span>`:""}</p>${table}`;
   }
 
-  const exportBtn=`<button class="veh-edit-btn" style="margin-right:10px" onclick="vehDocsExportCsv()" title="絞り込みで指定した発生期間（最大1年）のデータを、ページのCSVインポートで取り込めるCSV（全原価項目の列を含む）で出力します">${I.download("#0E7A4B",13)} 書類以外含む全項目編集</button>`;
+  const exportBtn=`<button class="veh-edit-btn" style="margin-right:10px" onclick="openVehDocsExport()" title="絞り込みで指定した発生期間（最大1年）のデータを、ページのCSVインポートで取り込めるCSV（全原価項目の列を含む）で出力します">${I.download("#0E7A4B",13)} 書類以外含む全項目編集</button>`;
   const finalizeBtn=state.vehDocsDirty
     ? `<button class="btn-green" style="margin-right:12px" onclick="vehDocsFinalize()">${I.check("#fff",14,3)} 編集を完了する</button>`
     : "";
@@ -5815,6 +5847,7 @@ function renderOverlay(){
   else if(state.vehEditKey) h=renderVehEditModal();
   else if(state.masterEdit) h=renderMasterEditModal();
   else if(state.costCsv) h=renderCostCsvModal();
+  if(state.vehDocsExport) h+=renderVehDocsExportModal(); // 内訳：全項目CSV出力の確認
   if(state.vehDocsDiscardConfirm) h+=renderVehDocsDiscardConfirm(); // 内訳：保存せずに閉じる確認
   if(state.vehDocsFinalizeConfirm) h+=renderVehDocsFinalizeConfirm(); // 内訳：編集確定の確認
   if(state.reflectConfirm) h+=renderReflectConfirm(); // 既存オーバーレイの上に確認モーダルを重ねる
