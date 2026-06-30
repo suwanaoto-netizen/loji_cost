@@ -1483,12 +1483,14 @@ function _metricsFromModel(model,agg){
 /* 車両コスト：1車両の原価項目別メトリクス */
 function vehicleMetrics(v){ return _metricsFromModel(VEHICLE_COST_MODEL,_vehAggregates(v)); }
 /* 拠点コスト：連携済み書類のうち拠点(scope=拠点)の明細を、営業所×原価項目×明細で集計 */
-function buildSites(){
+function buildSites(range){
   const byOffice={};
+  const inR = (range&&range.start&&range.end) ? (dt=>dt&&dt>=range.start&&dt<=range.end) : (()=>true);
   const adjIdx=new Map(); ADJUSTMENTS.forEach(a=>{ if(a.type==="override") adjIdx.set(adjKey(a.docId,a.lid),a); });
   docs.filter(d=>d.status==="連携済み"&&!d.deleted).forEach(d=>{
     linesOf(d.id).forEach(l=>{
       const eff=effDocLine(l,d.id,adjIdx);
+      if(!inR(eff.inspectedAt)) return;
       const km=lineKomoku(eff); const idx=KOMOKU_INDEX[km];
       if(!idx||idx.scope!=="拠点") return; // 拠点コストの明細のみ
       const office=d.category||"未分類";
@@ -2137,7 +2139,8 @@ let state={
   vehEditKey:null, vehEditMeta:null, vehEditConfirm:false, vehEditSnapshot:null, vehViewDocId:null, vehViewLid:null,
   vehDocsKey:null, vehDocsMeta:null, vehDocsKomoku:"all", vehDocsStart:null, vehDocsEnd:null, vehDocsPage:1, vehDocsPerPage:20,
   vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, vehDocsDirty:false,
-  vehDocsDiscardConfirm:false, vehDocsFinalizeConfirm:false, _vehDocsBackup:null, panelCtx:null,
+  vehDocsDiscardConfirm:false, vehDocsFinalizeConfirm:false, _vehDocsBackup:null, vehDocsScope:null, panelCtx:null,
+  siteTrash:new Set(), siteTrashView:false,
   vehPanel:null, vehChartCat:null, vehChartGran:"month", vehTlExpanded:false,
   vehTrash:new Set(), vehTrashView:false, vehTrashAction:null,
   changelogOpen:false, changelogSeenCount:0, vehEditHighlight:null,
@@ -3027,7 +3030,8 @@ function renderPanel(){
   const _nl=fromVeh?panelDocList():visibleDocs(); const _ni=_nl.findIndex(x=>x.id===state.panelId);
   const hasPrev=_ni>0, hasNext=_ni>=0&&_ni<_nl.length-1;
   const navPos=_ni>=0?`<span class="pn-navpos">${_ni+1} / ${_nl.length}</span>`:"";
-  const vehPlate=fromVeh&&state.vehDocsMeta?`<span class="plate" style="margin-right:4px">${esc(state.vehDocsMeta.target)}</span>`:"";
+  const fromSite=fromVeh&&vehDocsIsSite();
+  const vehPlate=fromVeh&&state.vehDocsMeta?(fromSite?`<span class="office-chip" style="margin-right:4px">${esc(state.vehDocsMeta.target)}</span>`:`<span class="plate" style="margin-right:4px">${esc(state.vehDocsMeta.target)}</span>`):"";
   const head=`<div class="pn-head">
     ${vehPlate}
     <div class="pn-no">No. <b>${d.no}</b></div>
@@ -3077,7 +3081,7 @@ function renderPanel(){
     return `<div class="line-card${otherVeh?" lc-other":""}">
       <div class="lc-head"><span class="lc-no">明細 ${idx+1}</span>
         <span class="match-badge" id="pn-badge-${l.lid}">${matchBadge(l)}</span>
-        ${otherVeh?`<span class="lc-other-tag" title="この車両（${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}）以外の明細のため編集できません">他車両の明細・編集不可</span>`:""}
+        ${otherVeh?`<span class="lc-other-tag" title="${fromSite?`この拠点（${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}）の拠点コスト以外の明細のため編集できません`:`この車両（${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}）以外の明細のため編集できません`}">${fromSite?"車両明細・編集不可":"他車両の明細・編集不可"}</span>`:""}
         ${lro?"":`<button class="lc-del" title="この明細を削除" onclick="pnAskDeleteLine(${l.lid})">${I.x("#B23A2E",15)}</button>`}</div>
       <div class="fld" id="pn-item-wrap-${l.lid}"><label>項目（OCR判定対象・部分一致で候補を上位表示）</label>${genbaSelectHTML(l.lid,l,lro)}${readHintHTML(l)}</div>
       <div class="grid2">
@@ -3100,7 +3104,7 @@ function renderPanel(){
   }).join("");
 
   const note=fromVeh
-    ? `<div class="pn-foot-note">${I.db("#B87514",16)}<span>この車両（<b>${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}</b>）の明細のみ編集できます。<b>原価項目は項目から自動判定される参考値</b>のため変更できません。「完了」で保存し、内訳一覧の<b>「編集を完了する」</b>で最終確定してください。</span></div>`
+    ? `<div class="pn-foot-note">${I.db("#B87514",16)}<span>${fromSite?`この拠点（<b>${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}</b>）の拠点コスト明細のみ`:`この車両（<b>${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}</b>）の明細のみ`}編集できます。<b>原価項目は項目から自動判定される参考値</b>のため変更できません。「完了」で保存し、内訳一覧の<b>「編集を完了する」</b>で最終確定してください。</span></div>`
     : `<div class="pn-foot-note">${I.db("#B87514",16)}<span>対象車両がロジポケに登録済みかは、上のバッジで自動判定しています（既存／新規／要確認）。<b>「データ連携する」</b>と、新規車両はマスタ作成、既存車両はコストを積み上げます。</span></div>`;
 
   const addLineBtn=(isReflected||fromVeh)?"":`<button class="vd-add" onclick="pnAddLine()">${I.plus("#0E5A40",14)} 明細を追加</button>`;
@@ -3676,6 +3680,12 @@ function openChangelog(){ state.changelogSeenCount=CHANGELOG.length; state.chang
 function closeChangelog(){ state.changelogOpen=false; renderOverlay(); }
 function gotoChange(idx){ const e=CHANGELOG[idx]; if(!e) return;
   state.changelogOpen=false;
+  if(e.siteTrash){ // 拠点のゴミ箱／復元・拠点コスト編集は拠点コストタブへ
+    state.view="vehicles"; state.vehTab="sites"; state.siteTrashView=state.siteTrash.has(e.siteOffice); render(); return;
+  }
+  if(e.siteOffice){ // 拠点コスト編集は拠点コストタブへ移動（行内編集モーダルは持たない）
+    state.view="vehicles"; state.vehTab="sites"; render(); return;
+  }
   if(e.vehTrash){ // ゴミ箱への移動／復元はコスト一覧（該当ビュー）へ移動
     state.view="vehicles"; state.vehTrashView=state.vehTrash.has(e.vehKey); state.vehPage=1; render(); return;
   }
@@ -3809,16 +3819,26 @@ function vehDocsDefaultRange(){
   const end=`${y}-${_pad2(m)}-${_pad2(_daysIn(y,m))}`; // 当月の末日
   return {start,end};
 }
-function openVehDocs(key,kind,target){
-  state.vehDocsKey=key; state.vehDocsMeta={key,kind,target};
+/* 内訳を開く共通処理（scope: 'vehicle' | 'site'） */
+function openVehDocsCommon(){
   state.vehDocsKomoku="all";
   const r=vehDocsDefaultRange(); state.vehDocsStart=r.start; state.vehDocsEnd=r.end;
   state.vehDocsPage=1; state.vehDocsCalOpen=false; state.vehDocsDirty=false;
   state.vehDocsDiscardConfirm=false; state.vehDocsFinalizeConfirm=false;
-  const v=buildVehicles("all").find(x=>x.key===key);
-  state.vehDocsSnapshot = v ? v.lines.filter(l=>l.src==="doc").map(l=>({lid:String(l.lid),docId:l.docId,item:l.item,komoku:lineKomoku(l),date:l.date,amount:+l.amount})) : [];
+  state.vehDocsSnapshot = vehDocsTargetLines().map(l=>({lid:String(l.lid),docId:l.docId,item:l.item,komoku:l.komoku,date:l.date,amount:+l.amount}));
   vehDocsSnapshotData(); // 「編集を完了する」まで確定しない＝閉じる時に破棄できるよう実データを退避
   renderOverlay();
+}
+function openVehDocs(key,kind,target){
+  state.vehDocsScope='vehicle';
+  state.vehDocsKey=key; state.vehDocsMeta={key,kind,target};
+  openVehDocsCommon();
+}
+/* 拠点（営業所）の内訳編集を開く */
+function openSiteDocs(office){
+  state.vehDocsScope='site';
+  state.vehDocsKey="site:"+office; state.vehDocsMeta={scope:'site',office,target:office,kind:'拠点'};
+  openVehDocsCommon();
 }
 /* 内訳を開いた時点の実データ（LINES・ADJUSTMENTS・書類項目）を退避（破棄時に復元） */
 function vehDocsSnapshotData(){
@@ -3838,7 +3858,7 @@ function vehDocsRestoreData(){
 }
 /* 内訳の状態をクリアして閉じる（実データの確定／破棄は呼び出し側で済ませる） */
 function clearVehDocsState(){
-  state.vehDocsKey=null; state.vehDocsMeta=null; state.vehDocsSnapshot=null;
+  state.vehDocsKey=null; state.vehDocsMeta=null; state.vehDocsSnapshot=null; state.vehDocsScope=null;
   state.vehDocsCalOpen=false; state.vehDocsDirty=false;
   state.vehDocsDiscardConfirm=false; state.vehDocsFinalizeConfirm=false; state._vehDocsBackup=null;
   render();
@@ -3851,24 +3871,27 @@ function closeVehDocs(){
 /* 内訳での編集の差分（スナップショット↔現状）。確認モーダル表示・変更履歴記録に共用 */
 function vehDocsDiff(){
   const snap=state.vehDocsSnapshot; const m=state.vehDocsMeta; if(!snap||!m) return [];
-  const v=buildVehicles("all").find(x=>x.key===m.key); if(!v) return [];
-  const snapMap=new Map(snap.map(l=>[l.lid,l]));
+  const snapMap=new Map(snap.map(l=>[String(l.lid),l]));
   const out=[];
-  v.lines.filter(l=>l.src==="doc").forEach(l=>{
+  vehDocsTargetLines().forEach(l=>{
     const s=snapMap.get(String(l.lid)); if(!s) return; const fields=[];
     if(l.item!==s.item) fields.push(["項目",s.item,l.item]);
-    if(lineKomoku(l)!==s.komoku) fields.push(["原価項目",s.komoku,lineKomoku(l)]);
+    if(l.komoku!==s.komoku) fields.push(["原価項目",s.komoku,l.komoku]);
     if(l.date!==s.date) fields.push(["発生日",s.date,l.date]);
     if(+l.amount!==+s.amount) fields.push(["金額",yen(s.amount),yen(l.amount)]);
-    if(fields.length) out.push({l,fields,docId:l.docId});
+    const cat=KOMOKU_INDEX[l.komoku]?KOMOKU_INDEX[l.komoku].legacyCat:"";
+    if(fields.length) out.push({l:{item:l.item,komoku:l.komoku,cat,lid:l.lid,docId:l.docId},fields,docId:l.docId});
   });
   return out;
 }
 /* 編集差分を変更履歴へ記録（確定時のみ） */
 function vehDocsCommit(){
   const m=state.vehDocsMeta; if(!m) return;
+  const isSite=vehDocsIsSite();
   vehDocsDiff().forEach(d=>{
-    logChange({vehKey:m.key,kind:m.kind,vehTarget:m.target,item:d.l.item,cat:d.l.cat,komoku:lineKomoku(d.l),lid:d.l.lid,docId:d.l.docId,action:"変更",detail:d.fields.map(f=>`${f[0]}を ${f[1]} → ${f[2]}`).join("、")});
+    const base={kind:m.kind,vehTarget:m.target,item:d.l.item,cat:d.l.cat,komoku:d.l.komoku,lid:d.l.lid,docId:d.l.docId,action:"変更",detail:d.fields.map(f=>`${f[0]}を ${f[1]} → ${f[2]}`).join("、")};
+    if(isSite) base.siteOffice=m.office; else base.vehKey=m.key;
+    logChange(base);
   });
 }
 function setVehDocsKomoku(v){ state.vehDocsKomoku=v; state.vehDocsPage=1; renderOverlay(); }
@@ -3919,19 +3942,41 @@ function renderVehDocsCal(){
     <div class="vcal-foot"><button class="vcal-clear" onclick="vehDocsQuickDefault()">当月＋先月に戻す</button><button class="vcal-close" onclick="closeVehDocsCal()">閉じる</button></div>
   </div>`;
 }
-/* 車両に紐づく書類を、原価項目・発生期間で絞り込んで返す。
-   返り値：[{d:書類, lines:この車両の該当明細, amount:該当明細合計, last:最新発生日}] を発生日の新しい順で */
+function vehDocsIsSite(){ return state.vehDocsScope==='site'; }
+/* 内訳の対象明細（編集対象）を正規化して返す：
+   車両＝この車両の連携明細、拠点＝この営業所の拠点(scope=拠点)明細。override 調整を反映。
+   返り値 [{lid,docId,item,komoku,date,amount}] */
+function vehDocsTargetLines(){
+  const m=state.vehDocsMeta; if(!m) return [];
+  if(vehDocsIsSite()){
+    const office=m.office;
+    const adjIdx=new Map(); ADJUSTMENTS.forEach(a=>{ if(a.type==="override") adjIdx.set(adjKey(a.docId,a.lid),a); });
+    const out=[];
+    docs.filter(d=>d.status==="連携済み"&&!d.deleted&&(d.category||"未分類")===office).forEach(d=>{
+      linesOf(d.id).forEach(l=>{
+        const eff=effDocLine(l,d.id,adjIdx);
+        const km=lineKomoku(eff); const idx=KOMOKU_INDEX[km];
+        if(!idx||idx.scope!=="拠点") return; // 拠点コストの明細のみ
+        out.push({lid:l.lid,docId:d.id,item:eff.item,komoku:km,date:eff.inspectedAt,amount:+eff.amount||0});
+      });
+    });
+    return out;
+  }
+  const v=buildVehicles("all").find(x=>x.key===m.key);
+  return v? v.lines.filter(l=>l.src==="doc").map(l=>({lid:l.lid,docId:l.docId,item:l.item,komoku:lineKomoku(l),date:l.date,amount:+l.amount})) : [];
+}
+/* 内訳の対象明細を、原価項目・発生期間で絞り込んで書類単位にまとめて返す。
+   返り値：[{d:書類, lines:該当明細, amount:該当明細合計, last:最新発生日}] を発生日の新しい順で */
 function vehDocsList(){
-  const key=state.vehDocsKey; if(!key) return [];
-  const v=buildVehicles("all").find(x=>x.key===key); if(!v) return [];
+  if(!state.vehDocsMeta) return [];
   const start=state.vehDocsStart, end=state.vehDocsEnd;
   const inR = (start&&end) ? (dt=>dt&&dt>=start&&dt<=end) : (()=>true);
   const kf=state.vehDocsKomoku;
   const map=new Map();
-  v.lines.forEach(l=>{
-    if(l.src!=="doc"||!l.docId) return;
+  vehDocsTargetLines().forEach(l=>{
+    if(!l.docId) return;
     if(!inR(l.date)) return;
-    if(kf!=="all" && lineKomoku(l)!==kf) return;
+    if(kf!=="all" && l.komoku!==kf) return;
     if(!map.has(l.docId)) map.set(l.docId,{docId:l.docId,lines:[]});
     map.get(l.docId).lines.push(l);
   });
@@ -3943,18 +3988,20 @@ function vehDocsList(){
   out.sort((a,b)=>{ if(a.last<b.last) return 1; if(a.last>b.last) return -1; return b.d.no-a.d.no; });
   return out;
 }
-/* 絞り込みに使う原価項目の選択肢（この車両の書類明細に実在する原価項目のみ） */
+/* 絞り込みに使う原価項目の選択肢（対象明細に実在する原価項目のみ） */
 function vehDocsKomokuList(){
-  const key=state.vehDocsKey; if(!key) return [];
-  const v=buildVehicles("all").find(x=>x.key===key); if(!v) return [];
+  if(!state.vehDocsMeta) return [];
   const order=ALL_COST_MODEL.map(g=>g.komoku);
-  const set=new Set(); v.lines.forEach(l=>{ if(l.src==="doc"){ const k=lineKomoku(l); if(k) set.add(k); } });
+  const set=new Set(); vehDocsTargetLines().forEach(l=>{ if(l.komoku) set.add(l.komoku); });
   return [...set].sort((a,b)=>{ const ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?999:ia)-(ib<0?999:ib); });
 }
 function renderVehDocsModal(){
   const key=state.vehDocsKey; if(!key) return "";
   const m=state.vehDocsMeta||{key,kind:"単車",target:key};
-  const titlePlate=`<span class="plate" style="margin-right:9px">${esc(m.target)}</span>`;
+  const isSite=vehDocsIsSite();
+  const subj=isSite?"この拠点（営業所）":"この車両";
+  const amtCol=isSite?"金額（この拠点分）":"金額（この車両分）";
+  const titlePlate=isSite?`<span class="office-chip" style="margin-right:9px">${esc(m.target)}</span>`:`<span class="plate" style="margin-right:9px">${esc(m.target)}</span>`;
   const list=vehDocsList();
   const hasRange=state.vehDocsStart&&state.vehDocsEnd;
   // 原価項目フィルタ
@@ -3985,7 +4032,7 @@ function renderVehDocsModal(){
   if(list.length===0){
     body=`<div class="twrap"><div class="empty">${I.file("#C0C7CF",40)}
       <div class="et">該当する書類がありません</div>
-      <div class="es">${hasRange?"発生期間や原価項目の絞り込みを変更してください。":"この車両に紐づく連携済み書類がありません。"}</div></div></div>`;
+      <div class="es">${hasRange?"発生期間や原価項目の絞り込みを変更してください。":`${subj}に紐づく連携済み書類がありません。`}</div></div></div>`;
   }else{
     const rows=slice.map(({d,lines,amount,last})=>{
       const koms=[...new Set(lines.map(l=>lineKomoku(l)).filter(Boolean))];
@@ -4002,7 +4049,7 @@ function renderVehDocsModal(){
       </tr>`;
     }).join("");
     const table=`<div class="twrap"><div class="tscroll"><table class="dt">
-      <thead><tr>${thVehDocs('no','No')}${thVehDocs('status','ステータス')}${thVehDocs('name','区分・書類名')}${thVehDocs('vendor','取引先')}${thVehDocs('date','取引日')}<th>原価項目</th>${thVehDocs('lines','明細')}${thVehDocs('amount','金額（この車両分）','r')}</tr></thead>
+      <thead><tr>${thVehDocs('no','No')}${thVehDocs('status','ステータス')}${thVehDocs('name','区分・書類名')}${thVehDocs('vendor','取引先')}${thVehDocs('date','取引日')}<th>原価項目</th>${thVehDocs('lines','明細')}${thVehDocs('amount',amtCol,'r')}</tr></thead>
       <tbody>${rows}</tbody></table></div>${vehDocsPager(info)}</div>`;
     body=`<p class="count-line">表示中 <b>${list.length}</b> 件${state.vehDocsKomoku!=="all"?`<span class="filter-summary">原価項目：${esc(state.vehDocsKomoku)}<button class="fs-clear" onclick="setVehDocsKomoku('all')">クリア</button></span>`:""}</p>${table}`;
   }
@@ -4015,7 +4062,7 @@ function renderVehDocsModal(){
       ${finalizeBtn}
       <button class="x" onclick="closeVehDocs()">${I.x("#5A6472",18)}</button></div>
     <div class="m-body">
-      <div class="vd-sub" style="margin:0 0 12px">この車両に紐づく連携済み書類を一覧表示します。<b>原価項目</b>・<b>発生期間</b>で絞り込めます（既定＝当月＋先月）。行をクリックすると右側のパネルで内容を編集できます。${state.vehDocsDirty?`<b style="color:var(--greenDark)">　編集があります。右上の「編集を完了する」で確定してください。</b>`:""}</div>
+      <div class="vd-sub" style="margin:0 0 12px">${subj}に紐づく連携済み書類を一覧表示します。<b>原価項目</b>・<b>発生期間</b>で絞り込めます（既定＝当月＋先月）。行をクリックすると右側のパネルで内容を編集できます。${state.vehDocsDirty?`<b style="color:var(--greenDark)">　編集があります。右上の「編集を完了する」で確定してください。</b>`:""}</div>
       ${filterBar}
       ${body}
     </div>
@@ -4050,6 +4097,7 @@ function panelDocList(){
 /* この明細が内訳パネルの対象車番（=この車両）に属するか。属さない明細は内訳では編集不可。 */
 function lineBelongsToVehDocsTarget(l){
   if(state.panelCtx!=="vehdocs"||!state.vehDocsMeta) return true;
+  if(vehDocsIsSite()){ const idx=KOMOKU_INDEX[lineKomoku(l)]; return !!(idx&&idx.scope==="拠点"); } // 拠点：拠点コスト明細のみ編集可
   const vid=(l&&l.vehicleId)||resolveVehicleId(l&&l.plate);
   const key=vid||((l&&normPlate(l.plate))?"U:"+normPlate(l.plate):"未設定");
   return key===state.vehDocsMeta.key;
@@ -4957,35 +5005,64 @@ function costBunruiHdr(schema){
 }
 /* ───── 拠点コストタブ：拠点(営業所)ごとに拠点原価項目を横一列で表示 ───── */
 function renderVehSites(){
+  const range=(state.vehDateStart&&state.vehDateEnd)?{start:state.vehDateStart,end:state.vehDateEnd}:null;
+  const hasRange=state.vehDateStart&&state.vehDateEnd;
+  const inTrash=state.siteTrashView;
+  const trashCount=CATEGORIES.filter(o=>state.siteTrash.has(o)).length;
+  const clogUnseen=CHANGELOG.length-(state.changelogSeenCount||0);
+  const all=buildSites(range);
+  const offices=CATEGORIES.filter(o=>inTrash?state.siteTrash.has(o):!state.siteTrash.has(o));
   const head=`<div class="pagehead pagehead-veh">
-    <div><p>連携済みの書類から、拠点（営業所）ごとに拠点コスト（荷役・施設・庸車・一般管理費など）を原価分類・原価項目別に集計します。1営業所＝1レコードで表示します。</p></div>
+    <div><p>連携済みの書類から、拠点（営業所）ごとに拠点コスト（荷役・施設・庸車・一般管理費など）を原価分類・原価項目別に集計します。1営業所＝1レコードで表示します。${hasRange?`<b style="color:var(--greenDark)">　期間：${state.vehDateStart}〜${state.vehDateEnd}</b>`:""}</p></div>
+    <div class="ph-spacer"></div>
+    <button class="trash-toggle ${inTrash?"on":""}" onclick="toggleSiteTrash()" title="ゴミ箱に移動した拠点は拠点コスト一覧から除外されます。いつでも元に戻せます。">${I.trash(inTrash?"#B23A2E":"#5A6472",13)} ゴミ箱<span style="font-family:var(--mono);font-size:10px;background:rgba(0,0,0,.06);padding:0 6px;border-radius:999px">${trashCount}</span></button>
+    <button class="btn-hist" onclick="openChangelog()" title="コスト内訳の変更履歴">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>
+      変更履歴${clogUnseen>0?`<span class="bh-ct">${clogUnseen}</span>`:""}</button>
   </div>`;
-  const note="";
-  const all=buildSites();
+  const periodCtrl=`<div class="vcal-wrap">
+    <button class="vcal-field ${state.vehCalOpen?'open':''}" onclick="toggleVehCal()" title="発生期間で絞り込み">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5A6472" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      ${hasRange?`<span>${state.vehDateStart}〜${state.vehDateEnd}</span>`:`<span class="ph">発生期間（全期間）</span>`}
+      ${hasRange?`<span class="vcal-x" onclick="event.stopPropagation();clearVehCal()" title="クリア">×</span>`:""}
+    </button>
+    ${renderVehCal()}
+  </div>`;
+  const filterBar=`<div class="veh-filters"><span class="vf-l">絞り込み</span>${periodCtrl}</div>`;
+  if(offices.length===0){
+    return head+filterBar+`<div class="veh-card"><div class="empty">${I.trash("#9AA3AD",30)}
+      <div class="et">${inTrash?"ゴミ箱は空です":"表示する拠点がありません"}</div>
+      <div class="es">${inTrash?"ゴミ箱へ移動した拠点はここに表示されます。いつでも元に戻せます。":"営業所をマスタに登録すると、拠点コストがここに集計されます。"}</div></div></div>`;
+  }
   const schema=siteMetrics("",all);
   const bunruiHdr=costBunruiHdr(schema);
   const groupHdr=schema.map(g=>{const cs=bunruiStyle(g.bunrui);
     return `<th class="vm-cat grp-start" colspan="${g.metrics.length}" style="color:${cs.fg}">${esc(g.komoku)}</th>`;}).join("");
   const labelHdr=schema.map(g=>g.metrics.map((m,i)=>
     `<th class="vm-label ${i===0?"grp-start":""} ${m.isSum?"sum":""}">${esc(m.label)}</th>`).join("")).join("");
-  const rows=CATEGORIES.map(o=>{
+  const rows=offices.map(o=>{
     const m=siteMetrics(o,all);
     const total=m.reduce((a,g)=>a+g.metrics[0].value,0);
     const cells=m.map(g=>{const cs=bunruiStyle(g.bunrui);
       return g.metrics.map((mm,i)=>`<td class="vm-col ${i===0?"grp-start":""} ${mm.isSum?"sum":""} ${mm.na?"na":""}" ${mm.isSum?`style="color:${cs.fg}"`:""}>${mm.na?"—":yen(mm.value)}</td>`).join("");}).join("");
-    return `<tr class="vrow" style="cursor:default">
+    const actCell=inTrash
+      ? `<button class="icon-btn restore" title="拠点コストに戻す" onclick="event.stopPropagation();siteAskRestore('${esc(o)}')">${I.undo("#0E7A4B",13)}</button>`
+      : `<button class="veh-edit-btn" onclick="event.stopPropagation();openSiteDocs('${esc(o)}')">${I.pencil("#0E7A4B",13)} 内訳編集</button>
+         <button class="icon-btn" title="ゴミ箱へ移動" style="margin-left:5px" onclick="event.stopPropagation();siteAskTrash('${esc(o)}')">${I.trash("#B23A2E",13)}</button>`;
+    return `<tr class="vrow${inTrash?" is-trash":""}" style="cursor:default">
       <td class="sticky-c sticky-c1"><span class="plate">${esc(o)}</span></td>
-      <td class="sticky-c sticky-c2 sticky-c-end r total">${yen(total)}</td>
+      <td class="sticky-c sticky-c2 r total">${yen(total)}</td>
+      <td class="sticky-c sticky-c3" style="white-space:nowrap">${actCell}</td>
       ${cells}</tr>`;
   }).join("");
   const table=`<div class="veh-card"><div class="tscroll"><table class="vt vt-metrics">
     <thead>
-      <tr><th rowspan="3" class="sticky-c sticky-c1">営業所（拠点）</th><th rowspan="3" class="sticky-c sticky-c2 sticky-c-end r">累計コスト</th>${bunruiHdr}</tr>
+      <tr><th rowspan="3" class="sticky-c sticky-c1">営業所（拠点）</th><th rowspan="3" class="sticky-c sticky-c2 r">累計コスト</th><th rowspan="3" class="sticky-c sticky-c3">操作</th>${bunruiHdr}</tr>
       <tr>${groupHdr}</tr>
       <tr>${labelHdr}</tr>
     </thead>
     <tbody>${rows}</tbody></table></div></div>`;
-  return head+note+costCsvBar('site')+table;
+  return head+filterBar+costCsvBar('site')+table;
 }
 function toggleVeh(k){if(state.vehExpanded.has(k))state.vehExpanded.delete(k);else state.vehExpanded.add(k);render();}
 function setVehCategoryFilter(v){ state.vehCategoryFilter=v; state.vehPage=1; render(); }
@@ -5112,8 +5189,35 @@ function vehAskTrash(key){ const v=_findVeh(key); if(!v) return;
 function vehAskRestore(key){ const v=_findVeh(key); if(!v) return;
   state.vehTrashAction={mode:"restore",key,kind:v.kind,target:v.target,total:v.total,count:v.count}; renderOverlay(); }
 function cancelVehTrashAction(){ state.vehTrashAction=null; renderOverlay(); }
+/* ───── 拠点（営業所）のゴミ箱 ───── */
+function toggleSiteTrash(){ state.siteTrashView=!state.siteTrashView; render(); }
+function _siteStats(office){
+  const data=buildSites()[office]||{};
+  let total=0; Object.keys(data).forEach(k=>total+=data[k]||0);
+  let count=0;
+  docs.filter(d=>d.status==="連携済み"&&!d.deleted&&(d.category||"未分類")===office).forEach(d=>{
+    linesOf(d.id).forEach(l=>{ const idx=KOMOKU_INDEX[lineKomoku(l)]; if(idx&&idx.scope==="拠点") count++; });
+  });
+  return {total,count};
+}
+function siteAskTrash(office){ const s=_siteStats(office); state.vehTrashAction={mode:"trash",scope:"site",office,target:office,total:s.total,count:s.count}; renderOverlay(); }
+function siteAskRestore(office){ const s=_siteStats(office); state.vehTrashAction={mode:"restore",scope:"site",office,target:office,total:s.total,count:s.count}; renderOverlay(); }
 function confirmVehTrashAction(){
   const a=state.vehTrashAction; state.vehTrashAction=null; if(!a){ renderOverlay(); return; }
+  if(a.scope==="site"){
+    if(a.mode==="trash"){
+      state.siteTrash.add(a.office);
+      logChange({action:"ゴミ箱",siteOffice:a.office,kind:"拠点",vehTarget:a.office,siteTrash:true,
+        detail:`拠点「${a.office}」をゴミ箱へ移動しました（累計 ${yen(a.total)}・明細 ${a.count}件）`});
+      render(); toast(`拠点 ${a.office} をゴミ箱へ移動しました`);
+    } else {
+      state.siteTrash.delete(a.office);
+      logChange({action:"復元",siteOffice:a.office,kind:"拠点",vehTarget:a.office,siteTrash:true,
+        detail:`拠点「${a.office}」を拠点コストに戻しました`});
+      render(); toast(`拠点 ${a.office} を拠点コストに戻しました`);
+    }
+    return;
+  }
   if(a.mode==="trash"){
     state.vehTrash.add(a.key);
     logChange({action:"ゴミ箱",vehKey:a.key,kind:a.kind,vehTarget:a.target,vehTrash:true,
@@ -5129,13 +5233,15 @@ function confirmVehTrashAction(){
 function renderVehTrashConfirm(){
   const a=state.vehTrashAction; if(!a) return "";
   const isTrash=a.mode==="trash";
+  const isSite=a.scope==="site";
+  const noun=isSite?"拠点":"車両", unit=isSite?"拠点":"車番", list=isSite?"拠点コスト一覧":"コストモニター";
   return `<div class="ovl anim" style="z-index:80" onclick="if(event.target===this)cancelVehTrashAction()"><div class="modal" style="width:min(480px,100%)">
-    <div class="m-head"><span class="t">${isTrash?I.trash("#B23A2E",18):I.undo("#0E5A40",18)} ${isTrash?"この車両をゴミ箱へ移動しますか？":"この車両を一覧に戻しますか？"}</span>
+    <div class="m-head"><span class="t">${isTrash?I.trash("#B23A2E",18):I.undo("#0E5A40",18)} ${isTrash?`この${noun}をゴミ箱へ移動しますか？`:`この${noun}を一覧に戻しますか？`}</span>
       <button class="x" onclick="cancelVehTrashAction()">${I.x("#5A6472",18)}</button></div>
     <div class="m-body">
       <div class="ce-warn" style="${isTrash?'background:var(--alertSoft);border-color:#E0B8B2':'background:var(--greenSoft);border-color:var(--greenLine)'}">${isTrash?I.alert("#B23A2E",18):I.check("#0E5A40",18,2.6)}<div>
-        <div class="ce-q">車番 ${esc(a.target)}（累計 ${yen(a.total)}・明細 ${a.count}件）</div>
-        <div class="ce-note">${isTrash?"ゴミ箱へ移動するとコストモニターに表示されなくなります。ゴミ箱からいつでも元に戻せます。":"コストモニターに再表示されます。"}この操作は変更履歴に記録されます。</div></div></div>
+        <div class="ce-q">${unit} ${esc(a.target)}（累計 ${yen(a.total)}・明細 ${a.count}件）</div>
+        <div class="ce-note">${isTrash?`ゴミ箱へ移動すると${list}に表示されなくなります。ゴミ箱からいつでも元に戻せます。`:`${list}に再表示されます。`}この操作は変更履歴に記録されます。</div></div></div>
     </div>
     <div class="m-foot">
       <button class="btn-cancel" onclick="cancelVehTrashAction()">キャンセル</button>
