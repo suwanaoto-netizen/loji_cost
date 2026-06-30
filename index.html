@@ -1483,11 +1483,12 @@ function _metricsFromModel(model,agg){
 /* 車両コスト：1車両の原価項目別メトリクス */
 function vehicleMetrics(v){ return _metricsFromModel(VEHICLE_COST_MODEL,_vehAggregates(v)); }
 /* 拠点コスト：連携済み書類のうち拠点(scope=拠点)の明細を、営業所×原価項目×明細で集計 */
-function buildSites(range){
+function buildSites(range, docFilter){
   const byOffice={};
   const inR = (range&&range.start&&range.end) ? (dt=>dt&&dt>=range.start&&dt<=range.end) : (()=>true);
   const adjIdx=new Map(); ADJUSTMENTS.forEach(a=>{ if(a.type==="override") adjIdx.set(adjKey(a.docId,a.lid),a); });
   docs.filter(d=>d.status==="連携済み"&&!d.deleted).forEach(d=>{
+    if(docFilter && !docFilter.has(d.id)) return; // 書類で絞り込み（内訳の選択チェック用）
     linesOf(d.id).forEach(l=>{
       const eff=effDocLine(l,d.id,adjIdx);
       if(!inR(eff.inspectedAt)) return;
@@ -2139,7 +2140,7 @@ let state={
   vehEditKey:null, vehEditMeta:null, vehEditConfirm:false, vehEditSnapshot:null, vehViewDocId:null, vehViewLid:null,
   vehDocsKey:null, vehDocsMeta:null, vehDocsKomoku:"all", vehDocsStart:null, vehDocsEnd:null, vehDocsPage:1, vehDocsPerPage:20,
   vehDocsCalOpen:false, vehDocsCalYM:"2026-06", vehDocsSnapshot:null, vehDocsDirty:false,
-  vehDocsDiscardConfirm:false, vehDocsFinalizeConfirm:false, _vehDocsBackup:null, vehDocsScope:null, vehDocsExport:null, panelCtx:null,
+  vehDocsDiscardConfirm:false, vehDocsFinalizeConfirm:false, _vehDocsBackup:null, vehDocsScope:null, vehDocsExport:null, vehDocsSelected:new Set(), panelCtx:null,
   siteTrash:new Set(), siteTrashView:false,
   vehPanel:null, vehChartCat:null, vehChartGran:"month", vehTlExpanded:false,
   vehTrash:new Set(), vehTrashView:false, vehTrashAction:null,
@@ -3510,7 +3511,7 @@ function renderReflectConfirm(){
 }
 
 /* ───── コストモニター（連携済み書類＋手動明細を集計） ───── */
-function buildVehicles(catFilter, range){
+function buildVehicles(catFilter, range, docFilter){
   const cf=catFilter||"all";
   const inR = (range&&range.start&&range.end) ? (dt=>dt&&dt>=range.start&&dt<=range.end) : (()=>true);
   const map=new Map();
@@ -3520,6 +3521,7 @@ function buildVehicles(catFilter, range){
   const adjIdx=new Map(); ADJUSTMENTS.forEach(a=>{ if(a.type==="override") adjIdx.set(adjKey(a.docId,a.lid),a); }); // override 調整の索引
   docs.filter(d=>d.status==="連携済み"&&!d.deleted).forEach(d=>{
     if(cf!=="all" && (d.category||"")!==cf) return;
+    if(docFilter && !docFilter.has(d.id)) return; // 書類で絞り込み（内訳の選択チェック用）
     linesOf(d.id).forEach(l=>{
       const eff=effDocLine(l,d.id,adjIdx); // 凍結された元明細 ＋ override 調整 ＝ 実効値
       if(!inR(eff.inspectedAt)) return;
@@ -3532,7 +3534,7 @@ function buildVehicles(catFilter, range){
       add(ensure(key,"単車",target),{lid:l.lid,src:"doc",docId:d.id,item:eff.item,cat:eff.cat,komoku:eff.komoku,date:eff.inspectedAt,amount:+eff.amount,vendor:d.vendor,doc:d.name,office:d.category,fuso:l.fuso});
     });
   });
-  state.manualLines.forEach(m=>{ if(cf!=="all" && (m.office||"")!==cf) return; if(!inR(m.date)) return;
+  state.manualLines.forEach(m=>{ if(docFilter) return; if(cf!=="all" && (m.office||"")!==cf) return; if(!inR(m.date)) return;
     { const _k=lineKomoku(m); if(KOMOKU_INDEX[_k]&&KOMOKU_INDEX[_k].scope==="拠点") return; }
     add(ensure(m.vkey,m.kind,m.target),{lid:m.id,src:"manual",item:m.item,cat:m.cat,komoku:m.komoku,date:m.date,amount:+m.amount,vendor:m.vendor||"手動追加",doc:"手動追加",office:m.office||""});
   });
@@ -3824,7 +3826,7 @@ function openVehDocsCommon(){
   state.vehDocsKomoku="all";
   const r=vehDocsDefaultRange(); state.vehDocsStart=r.start; state.vehDocsEnd=r.end;
   state.vehDocsPage=1; state.vehDocsCalOpen=false; state.vehDocsDirty=false;
-  state.vehDocsDiscardConfirm=false; state.vehDocsFinalizeConfirm=false;
+  state.vehDocsDiscardConfirm=false; state.vehDocsFinalizeConfirm=false; state.vehDocsSelected=new Set();
   state.vehDocsSnapshot = vehDocsTargetLines().map(l=>({lid:String(l.lid),docId:l.docId,item:l.item,komoku:l.komoku,date:l.date,amount:+l.amount}));
   vehDocsSnapshotData(); // 「編集を完了する」まで確定しない＝閉じる時に破棄できるよう実データを退避
   renderOverlay();
@@ -3894,15 +3896,21 @@ function vehDocsCommit(){
     logChange(base);
   });
 }
-function setVehDocsKomoku(v){ state.vehDocsKomoku=v; state.vehDocsPage=1; renderOverlay(); }
+function setVehDocsKomoku(v){ state.vehDocsKomoku=v; state.vehDocsPage=1; state.vehDocsSelected=new Set(); renderOverlay(); }
 function setVehDocsPage(p){ state.vehDocsPage=+p; renderOverlay(); }
 function setVehDocsPerPage(n){ state.vehDocsPerPage=+n; state.vehDocsPage=1; renderOverlay(); }
+/* 内訳書類一覧の選択（チェックボックス）。選択は「全項目編集」CSV出力の絞り込み条件になる。 */
+function toggleVehDocsSelect(docId){ const s=state.vehDocsSelected; s.has(docId)?s.delete(docId):s.add(docId); renderOverlay(); }
+function toggleVehDocsSelectAll(){ const ids=vehDocsList().map(x=>x.d.id);
+  const all=ids.length>0&&ids.every(id=>state.vehDocsSelected.has(id));
+  state.vehDocsSelected = all ? new Set() : new Set(ids); renderOverlay(); }
+function clearVehDocsSelection(){ state.vehDocsSelected=new Set(); renderOverlay(); }
 /* 期間カレンダー（一覧の発生期間カレンダーと同UI・専用state） */
 function toggleVehDocsCal(){ state.vehDocsCalOpen=!state.vehDocsCalOpen; if(state.vehDocsCalOpen){ state.vehDocsCalYM=(state.vehDocsStart||_CAL_TODAY).slice(0,7);} renderOverlay(); }
 function closeVehDocsCal(){ state.vehDocsCalOpen=false; renderOverlay(); }
 function vehDocsCalNav(delta){ const {y,m}=_ymParts(state.vehDocsCalYM); const d=new Date(y,m-1+delta,1); state.vehDocsCalYM=`${d.getFullYear()}-${_pad2(d.getMonth()+1)}`; renderOverlay(); }
 function vehDocsCalPickMonth(delta){ const {y,m}=_ymParts(state.vehDocsCalYM); const d=new Date(y,m-1+delta,1); const yy=d.getFullYear(),mm=d.getMonth()+1;
-  state.vehDocsStart=`${yy}-${_pad2(mm)}-01`; state.vehDocsEnd=`${yy}-${_pad2(mm)}-${_pad2(_daysIn(yy,mm))}`; state.vehDocsCalYM=`${yy}-${_pad2(mm)}`; state.vehDocsCalOpen=false; state.vehDocsPage=1; renderOverlay(); }
+  state.vehDocsStart=`${yy}-${_pad2(mm)}-01`; state.vehDocsEnd=`${yy}-${_pad2(mm)}-${_pad2(_daysIn(yy,mm))}`; state.vehDocsCalYM=`${yy}-${_pad2(mm)}`; state.vehDocsCalOpen=false; state.vehDocsPage=1; state.vehDocsSelected=new Set(); renderOverlay(); }
 function vehDocsCalPickDay(iso){
   const s=state.vehDocsStart, e=state.vehDocsEnd;
   if(!s || (s&&e)){ state.vehDocsStart=iso; state.vehDocsEnd=null; }
@@ -3913,10 +3921,10 @@ function vehDocsCalPickDay(iso){
     if(new Date(a.start)<cap){ a.start=`${cap.getFullYear()}-${_pad2(cap.getMonth()+1)}-${_pad2(cap.getDate())}`; toast("発生期間は最大1年です。開始日を調整しました"); }
     state.vehDocsStart=a.start; state.vehDocsEnd=a.end; state.vehDocsCalOpen=false;
   }
-  state.vehDocsPage=1; renderOverlay();
+  state.vehDocsPage=1; state.vehDocsSelected=new Set(); renderOverlay();
 }
-function clearVehDocsCal(){ state.vehDocsStart=null; state.vehDocsEnd=null; state.vehDocsPage=1; renderOverlay(); }
-function vehDocsQuickDefault(){ const r=vehDocsDefaultRange(); state.vehDocsStart=r.start; state.vehDocsEnd=r.end; state.vehDocsCalOpen=false; state.vehDocsPage=1; renderOverlay(); }
+function clearVehDocsCal(){ state.vehDocsStart=null; state.vehDocsEnd=null; state.vehDocsPage=1; state.vehDocsSelected=new Set(); renderOverlay(); }
+function vehDocsQuickDefault(){ const r=vehDocsDefaultRange(); state.vehDocsStart=r.start; state.vehDocsEnd=r.end; state.vehDocsCalOpen=false; state.vehDocsPage=1; state.vehDocsSelected=new Set(); renderOverlay(); }
 function renderVehDocsCal(){
   if(!state.vehDocsCalOpen) return "";
   const {y,m}=_ymParts(state.vehDocsCalYM);
@@ -4005,12 +4013,13 @@ function vehDocsKomokuList(){
 /* 出力に適用する期間（最大1年）。範囲未指定なら end を当日とし直近1年。範囲が1年超なら開始日を1年前へ丸める。 */
 function vehDocsExportRange(){
   let start=state.vehDocsStart, end=state.vehDocsEnd;
+  const hadRange=!!(start&&end);
   if(!end) end=_CAL_TODAY;
   if(!start){ const e=new Date(end); start=`${e.getFullYear()-1}-${_pad2(e.getMonth()+1)}-${_pad2(e.getDate())}`; }
   const e=new Date(end), cap=new Date(e.getFullYear()-1,e.getMonth(),e.getDate()+1);
-  const wasCapped=new Date(start)<cap;
-  if(wasCapped) start=`${cap.getFullYear()}-${_pad2(cap.getMonth()+1)}-${_pad2(cap.getDate())}`;
-  return {start,end,capped:wasCapped};
+  const capped = hadRange && new Date(start)<cap; // ユーザー指定の範囲が1年超のときのみ「調整」表示
+  if(new Date(start)<cap) start=`${cap.getFullYear()}-${_pad2(cap.getMonth()+1)}-${_pad2(cap.getDate())}`;
+  return {start,end,capped};
 }
 /* 期間に含まれる月（最大12ヶ月）の月初・月末 */
 function _vehDocsMonths(start,end){
@@ -4030,17 +4039,18 @@ function vehDocsExportCsv(){
   const {start,end,capped}=vehDocsExportRange();
   const months=_vehDocsMonths(start,end);
   const office=isSite?m.office:vehCurrentOffice(m.key);
+  const docFilter=state.vehDocsSelected.size? new Set(state.vehDocsSelected) : null; // チェックした書類があればその書類に限定
   const rows=[];
   months.forEach(mo=>{
     const range={start:mo.mStart,end:mo.mEnd};
     if(isSite){
-      const all=buildSites(range); const data=all[m.office]||{};
+      const all=buildSites(range,docFilter); const data=all[m.office]||{};
       const tot=Object.keys(data).reduce((a,k)=>a+(data[k]||0),0); if(tot<=0) return;
       const row=[m.office, mo.mStart];
       siteMetrics(m.office,all).forEach(g=>g.metrics.forEach(mm=>{ if(mm.isSum)return; row.push(mm.na?"":mm.value); }));
       rows.push(row);
     } else {
-      const v=buildVehicles("all",range).find(x=>x.key===m.key); if(!v||v.total<=0) return;
+      const v=buildVehicles("all",range,docFilter).find(x=>x.key===m.key); if(!v||v.total<=0) return;
       const row=[m.target, mo.mStart, office];
       vehicleMetrics(v).forEach(g=>g.metrics.forEach(mm=>{ if(mm.isSum)return; row.push(mm.na?"":mm.value); }));
       rows.push(row);
@@ -4063,14 +4073,20 @@ function renderVehDocsExportModal(){
   const sp=_costCsvScopeSpec(isSite?"site":"vehicle");
   const subj=isSite?"営業所":"車両";
   const {start,end,capped}=vehDocsExportRange();
+  const selN=state.vehDocsSelected.size;
+  const totalN=vehDocsList().length;
+  const docScope=selN>0
+    ? `<b style="color:var(--greenDark)">チェックした ${selN} 件の書類</b>に限定`
+    : `絞り込み期間内の<b>すべての書類（${totalN}件）</b>`;
   return `<div class="ovl anim" style="z-index:80" onclick="if(event.target===this)closeVehDocsExport()"><div class="modal" style="width:min(620px,100%)">
     <div class="m-head"><span class="t">${I.download("#0E5A40",18)} 書類以外含む全項目編集（CSV出力）</span>
       <button class="x" onclick="closeVehDocsExport()">${I.x("#5A6472",18)}</button></div>
     <div class="m-body">
-      <p style="font-size:13px;margin:0 0 13px;line-height:1.7">ページの<b>「CSVインポート」</b>で取り込める形式（全原価項目の列を含む）で出力します。<b>書類由来でない項目</b>もCSV上で編集できます。下記の<b>対象期間</b>をご確認ください。</p>
+      <p style="font-size:13px;margin:0 0 13px;line-height:1.7">ページの<b>「CSVインポート」</b>で取り込める形式（全原価項目の列を含む）で出力します。<b>書類由来でない項目</b>もCSV上で編集できます。下記の<b>出力範囲</b>をご確認ください。</p>
       <div class="ce-warn" style="background:var(--greenSoft);border-color:var(--greenLine)">${I.check("#0E5A40",18,2.6)}<div>
         <div class="ce-q">対象：<b>${subj} ${esc(m.target)}</b></div>
-        <div class="ce-note">対象期間（発生日）：<b>${start} 〜 ${end}</b>　${capped?`<span style="color:var(--alert);font-weight:800">※ 絞り込みが1年を超えるため、最大1年に調整しました</span>`:`<span style="color:var(--inkSoft)">（適用される期間は最大1年です）</span>`}</div></div></div>
+        <div class="ce-note" style="margin-top:4px">対象書類：${docScope}${selN>0?`<button class="fs-clear" onclick="clearVehDocsSelection()">選択を解除して全件にする</button>`:`<span style="color:var(--inkSoft)">（一覧でチェックすると対象を絞り込めます）</span>`}</div>
+        <div class="ce-note" style="margin-top:4px">対象期間（発生日）：<b>${start} 〜 ${end}</b>　${capped?`<span style="color:var(--alert);font-weight:800">※ 絞り込みが1年を超えるため、最大1年に調整しました</span>`:`<span style="color:var(--inkSoft)">（適用される期間は最大1年です）</span>`}</div></div></div>
       <div class="fld" style="margin-top:14px"><label>文字コード</label>
         <select class="in" onchange="setVehDocsExportCharset(this.value)">
           <option value="utf8bom">エクセル対応（UTF-8 BOM）</option>
@@ -4122,10 +4138,13 @@ function renderVehDocsModal(){
       <div class="et">該当する書類がありません</div>
       <div class="es">${hasRange?"発生期間や原価項目の絞り込みを変更してください。":`${subj}に紐づく連携済み書類がありません。`}</div></div></div>`;
   }else{
+    const allOn=list.length>0 && list.every(x=>state.vehDocsSelected.has(x.d.id));
     const rows=slice.map(({d,lines,amount,last})=>{
       const koms=[...new Set(lines.map(l=>lineKomoku(l)).filter(Boolean))];
       const komCell=koms.length?koms.map(k=>`<span class="office-chip">${esc(k)}</span>`).join(" "):`<span class="office-none">—</span>`;
-      return `<tr onclick="openVehDocPanel('${d.id}')">
+      const sel=state.vehDocsSelected.has(d.id);
+      return `<tr class="${sel?"sel":""}" onclick="openVehDocPanel('${d.id}')">
+        <td class="c" onclick="event.stopPropagation()"><input type="checkbox" ${sel?"checked":""} onclick="event.stopPropagation();toggleVehDocsSelect('${d.id}')"></td>
         <td class="no">${d.no}</td>
         <td>${statusChip(d.status)}</td>
         <td><div class="docname">${I.file("#177D58",16)}<span class="nm" title="${esc(d.name)}">${esc(d.name)}</span></div></td>
@@ -4136,13 +4155,17 @@ function renderVehDocsModal(){
         <td class="r">${yen(amount)}</td>
       </tr>`;
     }).join("");
+    const cbHead=`<th class="c" style="width:42px"><input type="checkbox" ${allOn?"checked":""} title="表示中のすべてを選択" onclick="event.stopPropagation();toggleVehDocsSelectAll()"></th>`;
     const table=`<div class="twrap"><div class="tscroll"><table class="dt">
-      <thead><tr>${thVehDocs('no','No')}${thVehDocs('status','ステータス')}${thVehDocs('name','区分・書類名')}${thVehDocs('vendor','取引先')}${thVehDocs('date','取引日')}<th>原価項目</th>${thVehDocs('lines','明細')}${thVehDocs('amount',amtCol,'r')}</tr></thead>
+      <thead><tr>${cbHead}${thVehDocs('no','No')}${thVehDocs('status','ステータス')}${thVehDocs('name','区分・書類名')}${thVehDocs('vendor','取引先')}${thVehDocs('date','取引日')}<th>原価項目</th>${thVehDocs('lines','明細')}${thVehDocs('amount',amtCol,'r')}</tr></thead>
       <tbody>${rows}</tbody></table></div>${vehDocsPager(info)}</div>`;
-    body=`<p class="count-line">表示中 <b>${list.length}</b> 件${state.vehDocsKomoku!=="all"?`<span class="filter-summary">原価項目：${esc(state.vehDocsKomoku)}<button class="fs-clear" onclick="setVehDocsKomoku('all')">クリア</button></span>`:""}</p>${table}`;
+    const selN=state.vehDocsSelected.size;
+    const selSummary=selN>0?`<span class="filter-summary" style="background:var(--greenSoft);border-color:var(--greenLine);color:var(--greenDark)">${I.check("#0E5A40",12,2.6)} ${selN}件を選択中（全項目編集の対象）<button class="fs-clear" onclick="clearVehDocsSelection()">選択解除</button></span>`:"";
+    body=`<p class="count-line">表示中 <b>${list.length}</b> 件${state.vehDocsKomoku!=="all"?`<span class="filter-summary">原価項目：${esc(state.vehDocsKomoku)}<button class="fs-clear" onclick="setVehDocsKomoku('all')">クリア</button></span>`:""}${selSummary}</p>${table}`;
   }
 
-  const exportBtn=`<button class="veh-edit-btn" style="margin-right:10px" onclick="openVehDocsExport()" title="絞り込みで指定した発生期間（最大1年）のデータを、ページのCSVインポートで取り込めるCSV（全原価項目の列を含む）で出力します">${I.download("#0E7A4B",13)} 書類以外含む全項目編集</button>`;
+  const selN=state.vehDocsSelected.size;
+  const exportBtn=`<button class="veh-edit-btn" style="margin-right:10px" onclick="openVehDocsExport()" title="${selN>0?`チェックした${selN}件の書類`:"絞り込み期間内の全書類"}（発生期間は最大1年）のデータを、ページのCSVインポートで取り込めるCSV（全原価項目の列を含む）で出力します">${I.download("#0E7A4B",13)} 書類以外含む全項目編集${selN>0?`<span class="bh-ct" style="background:var(--greenDark)">${selN}</span>`:""}</button>`;
   const finalizeBtn=state.vehDocsDirty
     ? `<button class="btn-green" style="margin-right:12px" onclick="vehDocsFinalize()">${I.check("#fff",14,3)} 編集を完了する</button>`
     : "";
@@ -4151,7 +4174,7 @@ function renderVehDocsModal(){
       ${exportBtn}${finalizeBtn}
       <button class="x" onclick="closeVehDocs()">${I.x("#5A6472",18)}</button></div>
     <div class="m-body">
-      <div class="vd-sub" style="margin:0 0 12px">${subj}に紐づく連携済み書類を一覧表示します。<b>原価項目</b>・<b>発生期間</b>で絞り込めます（既定＝当月＋先月）。行をクリックすると右側のパネルで内容を編集できます。${state.vehDocsDirty?`<b style="color:var(--greenDark)">　編集があります。右上の「編集を完了する」で確定してください。</b>`:""}</div>
+      <div class="vd-sub" style="margin:0 0 12px">${subj}に紐づく連携済み書類を一覧表示します。<b>原価項目</b>・<b>発生期間</b>で絞り込めます（既定＝当月＋先月）。行をクリックすると右側のパネルで内容を編集できます。左端の<b>チェック</b>で選んだ書類は、右上の<b>「書類以外含む全項目編集」</b>のCSV出力対象になります（未選択時は期間内すべて）。${state.vehDocsDirty?`<b style="color:var(--greenDark)">　編集があります。右上の「編集を完了する」で確定してください。</b>`:""}</div>
       ${filterBar}
       ${body}
     </div>
