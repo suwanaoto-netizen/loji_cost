@@ -1602,6 +1602,18 @@ function expectedDocTypes(d){
 }
 /* カテゴリー（主に営業所名）。設定で管理し、書類に紐付く */
 let CATEGORIES=["名古屋営業所","岡崎営業所","一宮営業所","岐阜営業所","四日市営業所"];
+/* 従業員マスタ（担当者・ドライバーの選択候補）。先頭はログイン中のアップロード担当者。 */
+let EMPLOYEES=["諏訪 尚杜","田中 太郎","佐藤 花子","鈴木 一郎","山田 健太","加藤 大輔"];
+/* 従業員マスタから選択するプルダウン（明細の担当者名・ドライバー名で使用） */
+function employeeSelectHTML(lid, field, value, opts){
+  opts=opts||{};
+  const ro=opts.disabled?"disabled":"";
+  const cur=value||"";
+  // マスタに無い値（削除済み等）も選択肢に残して表示崩れを防ぐ
+  const list=(EMPLOYEES.includes(cur)||!cur)?EMPLOYEES:[cur].concat(EMPLOYEES);
+  const opt0=`<option value="" ${cur===""?"selected":""}>（未選択）</option>`;
+  return `<select class="in" ${ro} onchange="pnLine(${lid},'${field}',this.value)">${opt0}${list.map(n=>`<option value="${esc(n)}" ${n===cur?"selected":""}>${esc(n)}</option>`).join("")}</select>`;
+}
 function officeChip(name){ return name?`<span class="office-chip">${esc(name)}</span>`:`<span class="office-none">未分類</span>`; }
 
 /* ───── 書類データ（請求書1枚 ＝ 1レコード、明細を内包） ───── */
@@ -3120,6 +3132,10 @@ function renderPanel(){
             ${(!lro&&cand.length)?`<div class="amt-pop"><div class="amt-pop-h">ファイルから読み取られた金額の一覧</div>${cand.map(a=>`<div class="amt-opt ${a===+l.amount?'sel':''}" onmousedown="pnPickAmount(${l.lid},${a})">${a.toLocaleString('ja-JP')}</div>`).join("")}</div>`:''}
           </div></div>
       </div>
+      <div class="grid2">
+        <div class="fld"><label>担当者名（アップロード担当・従業員マスタから選択）</label>${employeeSelectHTML(l.lid,'staff',(l.staff!=null?l.staff:CURRENT_USER),{disabled:lro})}</div>
+        <div class="fld"><label>ドライバー名（従業員マスタから選択）</label>${employeeSelectHTML(l.lid,'driver',(l.driver||""),{disabled:lro})}</div>
+      </div>
     </div>`;
   }).join("");
 
@@ -3358,7 +3374,9 @@ function pnPickAmount(lid,amount){
 /* 明細カードの手動追加（空の明細を末尾に追加。保存または連携で確定する） */
 function pnAddLine(){
   if(!state.draft || state.draft.status==="連携済み") return;
-  state.draft.lines.push(L("","",CATS[0]||"","",0,.99));
+  const nl=L("","",CATS[0]||"","",0,.99);
+  nl.staff=CURRENT_USER; nl.driver=""; // 担当者はアップロード担当者を既定、ドライバーは空
+  state.draft.lines.push(nl);
   renderOverlay();
   toast("明細を追加しました（保存または連携で確定します）");
 }
@@ -5498,6 +5516,7 @@ function renderSettings(){
   const s=d.settings;
   const sw=(on,fn)=>`<div class="switch ${on?"on":""}" onclick="${fn}"><div class="knob"></div></div>`;
   const officeChips=d.categories.map(c=>`<span class="set-chip">${esc(c)}<button title="削除" onclick="removeCategory('${esc(c)}')">×</button></span>`).join("");
+  const empChips=d.employees.map(e=>`<span class="set-chip">${esc(e)}<button title="削除" onclick="removeEmployee('${esc(e)}')">×</button></span>`).join("");
   const dirty=settingsDirty();
   const saveBar=dirty?`<div class="set-savebar">
       <span class="ssb-msg">${I.alert("#B87514",16)} 未保存の変更があります（${settingsDiff().length}件）</span>
@@ -5532,6 +5551,13 @@ function renderSettings(){
       <div class="set-d" style="margin-bottom:10px">書類に紐付く営業所です。ここで登録すると、アップロード・書類詳細で選択でき、書類一覧・コストモニターで絞り込めます。</div>
       <div class="set-chips">${officeChips||'<span class="set-d">営業所がありません。下から追加してください。</span>'}</div>
       <div class="set-add"><input class="in" id="new-office" placeholder="営業所名（例：豊橋営業所）" style="max-width:260px"><button class="btn-green" style="padding:8px 14px" onclick="addCategory()">${I.plus()} 追加</button></div>
+    </div>
+
+    <div class="set-card">
+      <div class="set-h">${I.boxes("#177D58",15)} 従業員マスタの管理 <span class="set-count">${EMPLOYEES.length}件</span></div>
+      <div class="set-d" style="margin-bottom:10px">明細の<b>担当者名</b>・<b>ドライバー名</b>で選択できる従業員です。担当者名はアップロードした担当者が既定で入り、ドライバー名は空欄が既定です。</div>
+      <div class="set-chips">${empChips||'<span class="set-d">従業員がいません。下から追加してください。</span>'}</div>
+      <div class="set-add"><input class="in" id="new-emp" placeholder="従業員名（例：高橋 修）" style="max-width:260px"><button class="btn-green" style="padding:8px 14px" onclick="addEmployee()">${I.plus()} 追加</button></div>
     </div>
 
     <div class="set-card">
@@ -5618,6 +5644,7 @@ function ensureSettingsDraft(){
     state.settingsDraft={
       settings:JSON.parse(JSON.stringify(state.settings)),
       categories:[...CATEGORIES],
+      employees:[...EMPLOYEES],
     };
   }
   return state.settingsDraft;
@@ -5625,7 +5652,8 @@ function ensureSettingsDraft(){
 function settingsDirty(){
   const d=state.settingsDraft; if(!d) return false;
   return JSON.stringify(d.settings)!==JSON.stringify(state.settings)
-    || JSON.stringify(d.categories)!==JSON.stringify(CATEGORIES);
+    || JSON.stringify(d.categories)!==JSON.stringify(CATEGORIES)
+    || JSON.stringify(d.employees)!==JSON.stringify(EMPLOYEES);
 }
 /* 変更点を人が読める差分として列挙（保存確認モーダルで使用） */
 function settingsDiff(){
@@ -5647,6 +5675,7 @@ function settingsDiff(){
     live.filter(x=>!draft.includes(x)).forEach(x=>out.push(`${label}を削除：${x}`));
   };
   diffArr(CATEGORIES,d.categories,"営業所");
+  diffArr(EMPLOYEES,d.employees,"従業員");
   return out;
 }
 function setSetting(k,v){ ensureSettingsDraft().settings[k]=v; render(); }
@@ -5657,6 +5686,10 @@ function addCategory(){ const d=ensureSettingsDraft(); const el=document.getElem
   if(!v){ toast("営業所名を入力してください"); return; } if(d.categories.includes(v)){ toast("すでに存在します"); return; }
   d.categories.push(v); render(); }
 function removeCategory(c){ const d=ensureSettingsDraft(); const i=d.categories.indexOf(c); if(i>=0) d.categories.splice(i,1); render(); }
+function addEmployee(){ const d=ensureSettingsDraft(); const el=document.getElementById("new-emp"); const v=(el?el.value:"").trim();
+  if(!v){ toast("従業員名を入力してください"); return; } if(d.employees.includes(v)){ toast("すでに存在します"); return; }
+  d.employees.push(v); render(); }
+function removeEmployee(e){ const d=ensureSettingsDraft(); const i=d.employees.indexOf(e); if(i>=0) d.employees.splice(i,1); render(); }
 function testLogipoke(){ toast("ロジポケへの接続テストに成功しました（ダミー）"); }
 function testMobipoke(){ toast("モビポケへの接続テストに成功しました（ダミー）"); }
 function testExternal(){ const n=(ensureSettingsDraft().settings.externalName||"外部サービス"); toast(`${n}への接続テストに成功しました（ダミー）`); }
@@ -5674,6 +5707,7 @@ function commitSettings(){
     CATEGORIES.length=0; d.categories.forEach(c=>CATEGORIES.push(c));
     if(!CATEGORIES.includes(state.categoryFilter)) state.categoryFilter="all";
     if(!CATEGORIES.includes(state.vehCategoryFilter)) state.vehCategoryFilter="all";
+    EMPLOYEES.length=0; d.employees.forEach(e=>EMPLOYEES.push(e));
   }
   state.settingsDraft=null; state.settingsSaveConfirm=false;
   render(); toast("設定を保存しました");
