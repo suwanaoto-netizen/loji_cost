@@ -3133,7 +3133,7 @@ function renderPanel(){
           </div></div>
       </div>
       <div class="grid2">
-        <div class="fld"><label>担当者名（アップロード担当・従業員マスタから選択）</label>${employeeSelectHTML(l.lid,'staff',(l.staff!=null?l.staff:CURRENT_USER),{disabled:lro})}</div>
+        <div class="fld"><label>担当者名（アップロード担当）</label>${employeeSelectHTML(l.lid,'staff',(l.staff!=null?l.staff:CURRENT_USER),{disabled:lro})}</div>
         <div class="fld"><label>ドライバー名（従業員マスタから選択）</label>${employeeSelectHTML(l.lid,'driver',(l.driver||""),{disabled:lro})}</div>
       </div>
     </div>`;
