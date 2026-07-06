@@ -2162,6 +2162,7 @@ let state={
   q:"",
   selected:new Set(), bulkMenu:false,
   docPage:1, docPerPage:20, vehPage:1, vehPerPage:20,
+  docDateStart:null, docDateEnd:null, docCalOpen:false, docCalYM:"2026-06",
   docSort:{key:null,dir:"asc"}, vehSort:{key:null,dir:"asc"},
   panelId:null, draft:null, pvZoom:100, pnDeleteLid:null,
   upload:{open:false, tab:"new", files:[], ocr:true, processing:{active:false,pct:0,label:""}, _timer:null},
@@ -2299,6 +2300,7 @@ function visibleDocs(){
   let list=docs.filter(d=>d.deleted===state.trash);
   if(!state.trash && state.statusSel.length) list=list.filter(d=>state.statusSel.includes(d.status));
   if(state.categoryFilter!=="all") list=list.filter(d=>(d.category||"")===state.categoryFilter);
+  if(state.docDateStart&&state.docDateEnd) list=list.filter(d=>{const dt=docDate(d); return dt&&dt>=state.docDateStart&&dt<=state.docDateEnd;});
   if(state.q.trim()){const q=state.q.trim().toLowerCase();
     list=list.filter(d=>(d.vendor+d.name+(d.category||"")).toLowerCase().includes(q));}
   return applyDocSort(list);
@@ -2322,9 +2324,19 @@ function renderDocuments(){
   const catSel=`<div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 営業所</span>
     <select onchange="setCategoryFilter(this.value)"><option value="all" ${state.categoryFilter==="all"?"selected":""}>すべて</option>
       ${CATEGORIES.map(c=>`<option value="${esc(c)}" ${state.categoryFilter===c?"selected":""}>${esc(c)}</option>`).join("")}</select></div>`;
+  const hasDocRange=state.docDateStart&&state.docDateEnd;
+  const periodCtrl=`<div class="vcal-wrap">
+    <button class="vcal-field ${state.docCalOpen?'open':''}" onclick="toggleDocCal()" title="取引日で絞り込み">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5A6472" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      ${hasDocRange?`<span>${state.docDateStart}〜${state.docDateEnd}</span>`:`<span class="ph">取引日（全期間）</span>`}
+      ${hasDocRange?`<span class="vcal-x" onclick="event.stopPropagation();clearDocCal()" title="クリア">×</span>`:""}
+    </button>
+    ${renderDocCal()}
+  </div>`;
   const toolbar=`<div class="toolbar">
     ${seg}
     ${catSel}
+    ${periodCtrl}
     <div class="srch">${I.search()}<input placeholder="取引先・書類名で検索" value="${esc(state.q)}" oninput="setQuery(this.value)"></div>
     <div class="tb-spacer"></div>
     <button class="trash-toggle ${state.trash?"on":""}" onclick="toggleTrash()">${I.trash(state.trash?"#B23A2E":"#5A6472",13)} ゴミ箱<span style="font-family:var(--mono);font-size:10px;background:rgba(0,0,0,.06);padding:0 6px;border-radius:999px">${trashCount}</span></button>
@@ -4599,6 +4611,50 @@ function renderVehCal(){
     <div class="vcal-grid vcal-wds">${wd}</div>
     <div class="vcal-grid vcal-days">${cells.join("")}</div>
     <div class="vcal-foot"><button class="vcal-clear" onclick="clearVehCal()">全期間に戻す</button><button class="vcal-close" onclick="closeVehCal()">閉じる</button></div>
+  </div>`;
+}
+/* ───── 書類一覧：取引日の期間絞り込みカレンダー（車両コストタブと同UI・専用state） ───── */
+function toggleDocCal(){ state.docCalOpen=!state.docCalOpen; if(state.docCalOpen){ state.docCalYM=(state.docDateStart||_CAL_TODAY).slice(0,7);} render(); }
+function closeDocCal(){ state.docCalOpen=false; render(); }
+function docCalNav(delta){ const {y,m}=_ymParts(state.docCalYM); const d=new Date(y,m-1+delta,1); state.docCalYM=`${d.getFullYear()}-${_pad2(d.getMonth()+1)}`; render(); }
+function docCalPickMonth(delta){ const {y,m}=_ymParts(state.docCalYM); const d=new Date(y,m-1+delta,1); const yy=d.getFullYear(),mm=d.getMonth()+1;
+  state.docDateStart=`${yy}-${_pad2(mm)}-01`; state.docDateEnd=`${yy}-${_pad2(mm)}-${_pad2(_daysIn(yy,mm))}`; state.docCalYM=`${yy}-${_pad2(mm)}`; state.docCalOpen=false; state.docPage=1; render(); }
+function docCalPickDay(iso){
+  const s=state.docDateStart, e=state.docDateEnd;
+  if(!s || (s&&e)){ state.docDateStart=iso; state.docDateEnd=null; }
+  else { if(iso<s){ state.docDateEnd=s; state.docDateStart=iso; } else { state.docDateEnd=iso; } state.docCalOpen=false; }
+  state.docPage=1; render();
+}
+function clearDocCal(){ state.docDateStart=null; state.docDateEnd=null; state.docPage=1; render(); }
+function renderDocCal(){
+  if(!state.docCalOpen) return "";
+  const {y,m}=_ymParts(state.docCalYM);
+  const s=state.docDateStart, e=state.docDateEnd;
+  const hint = (s&&e) ? `<div class="vcal-hint done">${s}〜${e}</div>` : `<div class="vcal-hint">開始日か終了日を選択してください</div>`;
+  const startDow=new Date(y,m-1,1).getDay();
+  const cells=[];
+  for(let i=0;i<42;i++){
+    const d=new Date(y,m-1,1-startDow+i);
+    const iso=`${d.getFullYear()}-${_pad2(d.getMonth()+1)}-${_pad2(d.getDate())}`;
+    const out=d.getMonth()!==(m-1), dow=d.getDay();
+    let cls="vcal-d"; if(out)cls+=" out"; else { if(dow===0)cls+=" sun"; if(dow===6)cls+=" sat"; }
+    if(iso===_CAL_TODAY)cls+=" today";
+    const isStart=s&&iso===s, isEnd=e&&iso===e;
+    if(s&&e&&iso>s&&iso<e) cls+=" in-range";
+    if(isStart||isEnd||(s&&!e&&iso===s)) cls+=" range-end-pt";
+    cells.push(`<button class="${cls}" onclick="docCalPickDay('${iso}')">${d.getDate()}</button>`);
+  }
+  const wd=["日","月","火","水","木","金","土"].map((w,i)=>`<div class="vcal-wd ${i===0?'sun':i===6?'sat':''}">${w}</div>`).join("");
+  const pm=m===1?12:m-1, nm=m===12?1:m+1;
+  return `<div class="vcal-backdrop" onclick="closeDocCal()"></div><div class="vcal-pop" onclick="event.stopPropagation()">
+    <div class="vcal-head"><button class="vcal-nav" onclick="docCalNav(-1)">◀前月</button>
+      <span class="vcal-title">${y}年 ${m}月</span>
+      <button class="vcal-nav" onclick="docCalNav(1)">次月▶</button></div>
+    ${hint}
+    <div class="vcal-quick"><button onclick="docCalPickMonth(-1)">${pm}月を選択</button><button onclick="docCalPickMonth(0)">${m}月を選択</button><button onclick="docCalPickMonth(1)">${nm}月を選択</button></div>
+    <div class="vcal-grid vcal-wds">${wd}</div>
+    <div class="vcal-grid vcal-days">${cells.join("")}</div>
+    <div class="vcal-foot"><button class="vcal-clear" onclick="clearDocCal()">全期間に戻す</button><button class="vcal-close" onclick="closeDocCal()">閉じる</button></div>
   </div>`;
 }
 /* 一覧に表示されている車両を、絞り込み・ゴミ箱・並び替えを反映した順序で返す（カルテの前へ／次へ送りにも使用） */
