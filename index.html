@@ -2385,6 +2385,7 @@ function renderDocBody(){
             <button ${enterable?"":"disabled"} onclick="bulkMarkEntered()"><span class="lab">${I.check(enterable?'#0E5A40':'#9AA3AD',14,2.6)} 入力済みにする</span><span class="mc">未入力 ${enterable}件</span></button>
             <button ${reflectable?"":"disabled"} onclick="bulkReflect()"><span class="lab">${I.send(reflectable?'#0E5A40':'#9AA3AD',14)} データ連携する</span><span class="mc">入力済み ${reflectable}件</span></button>
             <button ${officeable?"":"disabled"} onclick="bulkChangeOffice()"><span class="lab">${I.boxes(officeable?'#0E5A40':'#9AA3AD',14)} 営業所を変更</span><span class="mc">選択 ${officeable}件</span></button>
+            <button onclick="bulkExportPdf()"><span class="lab">${I.download('#0E5A40',14)} 原本をPDF出力</span><span class="mc">選択 ${sv.length}件</span></button>
             <button class="danger" onclick="bulkTrash()"><span class="lab">${I.trash('#B23A2E',14)} ゴミ箱へ移動</span><span class="mc">選択 ${sv.length}件</span></button>
           </div>`:""}
       </div></div>`;
@@ -2512,6 +2513,43 @@ function bulkTrash(){ state.bulkMenu=false;
   const t=visibleDocs().filter(d=>state.selected.has(d.id));
   if(t.length===0){ render(); return; }
   state.docTrashAction={mode:"trash", ids:t.map(d=>d.id), label:t.length===1?t[0].name:""}; renderOverlay(); }
+/* 選択した書類の原本を1つのPDFとしてまとめて出力（書類ごとに改ページ）。
+   プロトタイプではブラウザの印刷（PDFとして保存）を利用する。 */
+function bulkExportPdf(){ state.bulkMenu=false;
+  const t=visibleDocs().filter(d=>state.selected.has(d.id));
+  if(t.length===0){ render(); return; }
+  try{
+    const pages=t.map(d=>{
+      const sub=docTotal(d),tax=Math.round(sub*0.1),total=sub+tax;
+      const rows=docLines(d).map(l=>`<tr><td>${esc(l.item)}</td><td>車番 ${esc(l.plate||"-")}</td><td style="text-align:right">${yen(l.amount)}</td></tr>`).join("");
+      return `<section class="inv">
+        <h1 style="text-align:center;letter-spacing:4px">請求書</h1>
+        <p style="text-align:right;font-size:12px">No. INV-2026-${String(1000+(d.no||0))}　発行日：${docDate(d)}</p>
+        <p style="font-size:15px;font-weight:700;border-bottom:1px solid #1B2330;display:inline-block">${esc(state.settings.companyName)} 御中</p>
+        <p style="text-align:right;font-weight:700">${esc(d.vendor||"（取引先 未読取）")}</p>
+        <p style="font-size:12px;color:#5A6472">書類名：${esc(d.name)}／営業所：${esc(d.category||"未分類")}</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px" border="1" cellpadding="7">
+        <thead><tr style="background:#1B2330;color:#fff"><th>項目</th><th>対象</th><th>金額</th></tr></thead><tbody>${rows}</tbody></table>
+        <p style="text-align:right;margin-top:12px">小計 ${yen(sub)}／消費税 ${yen(tax)}／<b>合計 ${yen(total)}</b></p>
+      </section>`;
+    }).join("");
+    const html=`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>原本_${t.length}件_PDF出力</title>
+<style>
+  body{font-family:sans-serif;color:#1B2330;margin:0}
+  .inv{max-width:680px;margin:0 auto;padding:30px 24px;box-sizing:border-box}
+  .inv+.inv{page-break-before:always;break-before:page}
+  @media print{ body{margin:0} }
+</style></head>
+<body>${pages}
+<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
+</body></html>`;
+    const w=window.open("","_blank");
+    if(!w){ toast("ポップアップがブロックされました。ブラウザの設定で許可してください"); render(); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+    render();
+    toast(`${t.length}件の原本をPDF出力します（印刷ダイアログでPDFとして保存）`);
+  }catch(e){ render(); toast("PDF出力を開始できませんでした"); }
+}
 function toggleTrash(){state.trash=!state.trash;state.statusSel=[];state.selected.clear();state.bulkMenu=false;state.docPage=1;render();}
 /* ───── 書類のゴミ箱（確認ステップ。コストモニターと同仕様） ───── */
 function trashDoc(id){const d=docs.find(x=>x.id===id);if(!d)return; state.docTrashAction={mode:"trash", ids:[id], label:d.name}; renderOverlay();}
