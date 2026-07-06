@@ -4557,7 +4557,7 @@ function renderVehPanel(){
         <button class="pn-navbtn" ${hasNext?"":"disabled"} title="次の車両" onclick="vehPanelNav(1)">次へ<span class="ic-r">${I.chev("#5A6472",13)}</span></button>
       </div>
       <div class="pn-actions">
-        <button class="btn-ghost" onclick="closeVehPanel();openVehEdit('${v.key}','${v.kind}','${esc(v.target)}')">${I.pencil("#5A6472",13)} 明細を編集</button>
+        <button class="veh-edit-btn" onclick="closeVehPanel();openVehDocs('${v.key}','${v.kind}','${esc(v.target)}')">${I.pencil("#0E7A4B",13)} 内訳編集</button>
         <button class="icon-btn" style="border-color:var(--line)" title="閉じる" onclick="closeVehPanel()">${I.x("#5A6472",16)}</button>
       </div>
     </div>
