@@ -2155,7 +2155,7 @@ let state={
   collapsed:true,
   aiConfirm:null,   // 書類を開いた時の明細確認ステップ
   statusSel:[],   // 選択中のステータス（複数可・空＝すべて）
-  categoryFilter:"all", vehCategoryFilter:"all", vehTab:"monitor",
+  categoryFilter:"all", vehCategoryFilter:"all", vehPlateFilter:"all", siteOfficeFilter:"all", vehTab:"monitor",
   invTab:"stock", invCat:"all", invOffice:"all",
   chartOffice:"all", chart2Cat:"燃料費", chart2Klass:"all",
   trash:false, docTrashAction:null,
@@ -4701,6 +4701,7 @@ function visibleVehicles(){
   const allVeh=buildVehicles(state.vehCategoryFilter, vehRange);
   const inTrash=state.vehTrashView;
   let veh=allVeh.filter(v=>inTrash?state.vehTrash.has(v.key):!state.vehTrash.has(v.key));
+  if(state.vehPlateFilter!=="all") veh=veh.filter(v=>v.key===state.vehPlateFilter);
   if(state.vehSort.key){
     const dir=state.vehSort.dir==="asc"?1:-1;
     const sk=state.vehSort.key;
@@ -5136,12 +5137,19 @@ function renderVehIndividual(){
   const allVeh=buildVehicles(state.vehCategoryFilter, vehRange);
   const trashCount=allVeh.filter(v=>state.vehTrash.has(v.key)).length;
   const inTrash=state.vehTrashView;
+  /* 車両ごとの絞り込み：現在の営業所・期間で集計対象となる車両（ゴミ箱状態に応じる）から選択。
+     選択中の車両が対象外（営業所・期間変更で消えた）になった場合は「すべて」に戻す。 */
+  const plateOpts=allVeh.filter(v=>inTrash?state.vehTrash.has(v.key):!state.vehTrash.has(v.key));
+  if(state.vehPlateFilter!=="all"&&!plateOpts.some(v=>v.key===state.vehPlateFilter)) state.vehPlateFilter="all";
   let veh=visibleVehicles();
   const clogUnseen=CHANGELOG.length-(state.changelogSeenCount||0);
   const hasRange=state.vehDateStart&&state.vehDateEnd;
   const catSel=`<div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 営業所</span>
     <select onchange="setVehCategoryFilter(this.value)"><option value="all" ${state.vehCategoryFilter==="all"?"selected":""}>すべて</option>
       ${CATEGORIES.map(c=>`<option value="${esc(c)}" ${state.vehCategoryFilter===c?"selected":""}>${esc(c)}</option>`).join("")}</select></div>`;
+  const plateSel=`<div class="filter-sel"><span class="fs-l">${I.truckN?I.truckN("#5A6472",14):I.boxes("#5A6472",14)} 車両</span>
+    <select onchange="setVehPlateFilter(this.value)"><option value="all" ${state.vehPlateFilter==="all"?"selected":""}>すべて</option>
+      ${plateOpts.map(v=>`<option value="${esc(v.key)}" ${state.vehPlateFilter===v.key?"selected":""}>${esc(v.target)}</option>`).join("")}</select></div>`;
   const periodCtrl=`<div class="vcal-wrap">
     <button class="vcal-field ${state.vehCalOpen?'open':''}" onclick="toggleVehCal()" title="発生期間で絞り込み">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5A6472" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
@@ -5151,14 +5159,14 @@ function renderVehIndividual(){
     ${renderVehCal()}
   </div>`;
   const head=`<div class="pagehead pagehead-veh">
-    <div><p>連携済みの書類から、車両（車番）ごとにコストを自動集計します。1車番＝1レコードで、常に最新の積み上げを表示します。${state.vehCategoryFilter!=="all"?`<b style="color:var(--greenDark)">　絞り込み：${esc(state.vehCategoryFilter)}</b>`:""}${hasRange?`<b style="color:var(--greenDark)">　期間：${state.vehDateStart}〜${state.vehDateEnd}</b>`:""}</p></div>
+    <div><p>連携済みの書類から、車両（車番）ごとにコストを自動集計します。1車番＝1レコードで、常に最新の積み上げを表示します。${state.vehCategoryFilter!=="all"?`<b style="color:var(--greenDark)">　絞り込み：${esc(state.vehCategoryFilter)}</b>`:""}${state.vehPlateFilter!=="all"?`<b style="color:var(--greenDark)">　車両：${esc((plateOpts.find(v=>v.key===state.vehPlateFilter)||{}).target||"")}</b>`:""}${hasRange?`<b style="color:var(--greenDark)">　期間：${state.vehDateStart}〜${state.vehDateEnd}</b>`:""}</p></div>
     <div class="ph-spacer"></div>
     <button class="trash-toggle ${inTrash?"on":""}" onclick="toggleVehTrash()" title="ゴミ箱に移動した車両は、モニターの集計（登録車両数・コスト合計・各ピックアップ）から除外されます。いつでも元に戻せます。">${I.trash(inTrash?"#B23A2E":"#5A6472",13)} ゴミ箱<span style="font-family:var(--mono);font-size:10px;background:rgba(0,0,0,.06);padding:0 6px;border-radius:999px">${trashCount}</span></button>
     <button class="btn-hist" onclick="openChangelog()" title="コスト内訳の変更履歴">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>
       変更履歴${clogUnseen>0?`<span class="bh-ct">${clogUnseen}</span>`:""}</button>
   </div>`;
-  const filterBar=`<div class="veh-filters"><span class="vf-l">絞り込み</span>${catSel}${periodCtrl}</div>`;
+  const filterBar=`<div class="veh-filters"><span class="vf-l">絞り込み</span>${catSel}${plateSel}${periodCtrl}</div>`;
 
   if(veh.length===0){
     if(inTrash) return head+filterBar+`<div class="veh-card"><div class="empty">${I.trash("#9AA3AD",30)}
@@ -5257,9 +5265,13 @@ function renderVehSites(){
   const trashCount=CATEGORIES.filter(o=>state.siteTrash.has(o)).length;
   const clogUnseen=CHANGELOG.length-(state.changelogSeenCount||0);
   const all=buildSites(range);
-  const offices=CATEGORIES.filter(o=>inTrash?state.siteTrash.has(o):!state.siteTrash.has(o));
+  let offices=CATEGORIES.filter(o=>inTrash?state.siteTrash.has(o):!state.siteTrash.has(o));
+  /* 営業所ごとの絞り込み：選択中の営業所が対象外（ゴミ箱状態の変化で消えた）になった場合は「すべて」に戻す */
+  if(state.siteOfficeFilter!=="all"&&!offices.includes(state.siteOfficeFilter)) state.siteOfficeFilter="all";
+  const officeOptsAll=offices.slice();
+  if(state.siteOfficeFilter!=="all") offices=offices.filter(o=>o===state.siteOfficeFilter);
   const head=`<div class="pagehead pagehead-veh">
-    <div><p>連携済みの書類から、拠点（営業所）ごとに拠点コスト（荷役・施設・庸車・一般管理費など）を原価分類・原価項目別に集計します。1営業所＝1レコードで表示します。${hasRange?`<b style="color:var(--greenDark)">　期間：${state.vehDateStart}〜${state.vehDateEnd}</b>`:""}</p></div>
+    <div><p>連携済みの書類から、拠点（営業所）ごとに拠点コスト（荷役・施設・庸車・一般管理費など）を原価分類・原価項目別に集計します。1営業所＝1レコードで表示します。${state.siteOfficeFilter!=="all"?`<b style="color:var(--greenDark)">　絞り込み：${esc(state.siteOfficeFilter)}</b>`:""}${hasRange?`<b style="color:var(--greenDark)">　期間：${state.vehDateStart}〜${state.vehDateEnd}</b>`:""}</p></div>
     <div class="ph-spacer"></div>
     <button class="trash-toggle ${inTrash?"on":""}" onclick="toggleSiteTrash()" title="ゴミ箱に移動した拠点は拠点コスト一覧から除外されます。いつでも元に戻せます。">${I.trash(inTrash?"#B23A2E":"#5A6472",13)} ゴミ箱<span style="font-family:var(--mono);font-size:10px;background:rgba(0,0,0,.06);padding:0 6px;border-radius:999px">${trashCount}</span></button>
     <button class="btn-hist" onclick="openChangelog()" title="コスト内訳の変更履歴">
@@ -5274,7 +5286,10 @@ function renderVehSites(){
     </button>
     ${renderVehCal()}
   </div>`;
-  const filterBar=`<div class="veh-filters"><span class="vf-l">絞り込み</span>${periodCtrl}</div>`;
+  const officeSel=`<div class="filter-sel"><span class="fs-l">${I.boxes("#5A6472",14)} 営業所</span>
+    <select onchange="setSiteOfficeFilter(this.value)"><option value="all" ${state.siteOfficeFilter==="all"?"selected":""}>すべて</option>
+      ${officeOptsAll.map(o=>`<option value="${esc(o)}" ${state.siteOfficeFilter===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>`;
+  const filterBar=`<div class="veh-filters"><span class="vf-l">絞り込み</span>${officeSel}${periodCtrl}</div>`;
   if(offices.length===0){
     return head+filterBar+`<div class="veh-card"><div class="empty">${I.trash("#9AA3AD",30)}
       <div class="et">${inTrash?"ゴミ箱は空です":"表示する拠点がありません"}</div>
@@ -5417,7 +5432,9 @@ function renderVehAnnual(){
   return head+filterBar+body;
 }
 function toggleVeh(k){if(state.vehExpanded.has(k))state.vehExpanded.delete(k);else state.vehExpanded.add(k);render();}
-function setVehCategoryFilter(v){ state.vehCategoryFilter=v; state.vehPage=1; render(); }
+function setVehCategoryFilter(v){ state.vehCategoryFilter=v; state.vehPlateFilter="all"; state.vehPage=1; render(); }
+function setVehPlateFilter(v){ state.vehPlateFilter=v; state.vehPage=1; render(); }
+function setSiteOfficeFilter(v){ state.siteOfficeFilter=v; render(); }
 function setVehTab(t){ state.vehTab=t; render(); }
 /* ═══════════════ 在庫管理タブ ═══════════════ */
 function setInvTab(t){ state.invTab=t; render(); }
