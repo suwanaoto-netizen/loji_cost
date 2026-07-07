@@ -6147,55 +6147,7 @@ function costCsvFiles(files){ const c=state.costCsv; if(!c||!files||!files[0])re
 function costCsvDrop(e){ e.preventDefault(); const dz=e.currentTarget; if(dz)dz.classList.remove("drag"); costCsvFiles(e.dataTransfer.files); }
 function costCsvUpload(){ const c=state.costCsv; if(!c||!c.rows.length)return; toast(`${c.rows.length}件のコストを取り込みました（デモ）`); closeCostCsv(); }
 /* テーブルヘッダーのすぐ上・右端に置くCSV操作バー */
-/* 原価分類→原価項目→項目（明細）の一覧を1ページのPDFとして出力（車両／拠点それぞれ） */
-function costModelExportPdf(scope){
-  try{
-    const isV=scope==="vehicle";
-    const model=isV?VEHICLE_COST_MODEL:SITE_COST_MODEL;
-    const title=isV?"車両コスト":"拠点コスト";
-    const byB={}, order=[];
-    model.forEach(g=>{ if(!byB[g.bunrui]){byB[g.bunrui]=[];order.push(g.bunrui);} byB[g.bunrui].push(g); });
-    const totalKom=model.length, totalItems=model.reduce((a,g)=>a+g.items.length,0);
-    const sections=order.map(b=>{ const cs=bunruiStyle(b);
-      const koms=byB[b].map(g=>{
-        const items=g.items.map(it=>`<li><span class="lb">${esc(it.label)}</span>${(it.genba&&it.genba!==it.label)?`<span class="gb">${esc(it.genba)}</span>`:""}</li>`).join("");
-        return `<div class="kom"><div class="kom-t">${esc(g.komoku)}<span class="cnt">${g.items.length}</span></div><ul>${items}</ul></div>`;
-      }).join("");
-      return `<section class="bsec"><div class="bhd" style="color:${cs.fg};background:${cs.bg}">${esc(b)}<span class="bn">${byB[b].length}項目</span></div>${koms}</section>`;
-    }).join("");
-    const html=`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>${esc(title)}_原価項目一覧</title>
-<style>
-  @page{ size:A4 portrait; margin:11mm; }
-  *{box-sizing:border-box}
-  body{font-family:'Noto Sans JP','Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif;color:#1B2330;margin:0}
-  h1{font-size:15px;margin:0 0 2px}
-  .meta{font-size:10.5px;color:#5A6472;margin:0 0 9px}
-  .cols{column-count:2;column-gap:14px}
-  .bsec{margin:0 0 7px;break-inside:avoid}
-  .bhd{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;margin:0 0 5px}
-  .bhd .bn{font-size:9px;font-weight:700;opacity:.8}
-  .kom{break-inside:avoid;margin:0 0 6px}
-  .kom-t{font-size:10.5px;font-weight:800;color:#1B2330;border-bottom:1px solid #D9DED5;padding-bottom:2px;margin-bottom:3px}
-  .kom-t .cnt{font-size:8.5px;color:#5A6472;font-weight:700;margin-left:6px}
-  ul{margin:0;padding:0 0 0 15px;list-style:disc}
-  li{font-size:9.5px;line-height:1.45;color:#1B2330;margin:0 0 1px}
-  li .gb{color:#7A828C;font-size:8.5px;margin-left:6px}
-  @media print{ body{margin:0} }
-</style></head>
-<body>
-  <h1>${title}　原価項目・項目一覧</h1>
-  <div class="meta">原価分類（変動費・固定費・間接費・その他直接費）→ 原価項目 → 項目（明細）／灰字は現場がわかる表現　・　原価項目 ${totalKom}／項目 ${totalItems}</div>
-  <div class="cols">${sections}</div>
-<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
-</body></html>`;
-    const w=window.open("","_blank");
-    if(!w){ toast("ポップアップがブロックされました。ブラウザの設定で許可してください"); return; }
-    w.document.open(); w.document.write(html); w.document.close();
-    toast(`${title}の原価項目一覧をPDF出力します（印刷ダイアログでPDFとして保存）`);
-  }catch(e){ toast("PDF出力を開始できませんでした"); }
-}
 function costCsvBar(scope){ return `<div class="csv-bar">
-  <button class="veh-edit-btn" onclick="costModelExportPdf('${scope}')" title="原価分類・原価項目・項目の一覧を1ページのPDFで出力">${I.download("#0E7A4B",13)} 原価項目一覧PDF</button>
   <button class="veh-edit-btn" onclick="openCostCsv('download','${scope}')" title="CSVでダウンロード">${I.download("#0E7A4B",13)} CSVダウンロード</button>
   <button class="veh-edit-btn" onclick="openCostCsv('import','${scope}')" title="CSVから取り込み">${I.cloud("#0E7A4B",16)} CSVインポート</button>
 </div>`; }
