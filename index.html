@@ -956,6 +956,7 @@
   .annual-period-lab{font-weight:800;font-size:12.5px;color:var(--ink);font-family:var(--mono);min-width:190px;text-align:center}
   .annual-card{margin-bottom:16px}
   .annual-head{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--lineSoft)}
+  .annual-head .annual-pdf{margin-left:auto;flex-shrink:0}
   .annual-sub{font-size:12.5px;color:var(--inkSoft)}
   .annual-tbl thead th{background:#F3F5F2;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:11px;font-weight:800}
   .annual-tbl th.annual-col{white-space:nowrap;text-align:right;position:sticky;top:0;z-index:2}
@@ -5405,12 +5406,61 @@ function annualTable(scope,id,label,months,agg){
     <td class="r total">${yen(grand)}</td>
     ${model.map(g=>`<td class="r">${cell(colTotals[g.komoku]||0)}</td>`).join("")}</tr>`;
   const chip=isV?`<span class="plate">${esc(label)}</span>`:`<span class="office-chip">${esc(label)}</span>`;
+  const pdfBtn=`<button class="veh-edit-btn annual-pdf" onclick="annualExportPdf('${scope}','${esc(id)}')" title="このカードを1ページのPDFで出力">${I.download("#0E5A40",13)} PDF出力</button>`;
   return `<div class="veh-card annual-card">
-    <div class="annual-head">${chip}<span class="annual-sub">${isV?"車両":"拠点"}・年間合計 <b>${yen(grand)}</b></span></div>
+    <div class="annual-head">${chip}<span class="annual-sub">${isV?"車両":"拠点"}・年間合計 <b>${yen(grand)}</b></span>${pdfBtn}</div>
     <div class="tscroll"><table class="vt vt-metrics annual-tbl">
       <thead><tr><th class="sticky-c sticky-c1">月</th><th class="r">月合計</th>${headCols}</tr></thead>
       <tbody>${bodyRows}${footer}</tbody></table></div>
   </div>`;
+}
+/* 年間一覧カードを1ページのPDFとして出力（横向きA4に全原価項目×12ヶ月を収める） */
+function annualExportPdf(scope,id){
+  try{
+    const isV=scope==="vehicle";
+    const months=annualMonths();
+    const agg=annualAggregate(months);
+    const model=isV?VEHICLE_COST_MODEL:SITE_COST_MODEL;
+    const data=isV?((agg.veh[id]||{}).ym||{}):(agg.site[id]||{});
+    const label=isV?((agg.veh[id]||{}).target||id):id;
+    const cell=v=>v>0?yen(v):"—";
+    const colTotals={}; let grand=0;
+    const bodyRows=months.map(mo=>{ const by=data[mo.ym]||{}; let tot=0; Object.keys(by).forEach(k=>tot+=by[k]||0);
+      model.forEach(g=>{ colTotals[g.komoku]=(colTotals[g.komoku]||0)+(by[g.komoku]||0); }); grand+=tot;
+      return `<tr><td class="mo">${esc(mo.label)}</td><td class="r tot">${cell(tot)}</td>${model.map(g=>`<td class="r">${cell(by[g.komoku]||0)}</td>`).join("")}</tr>`; }).join("");
+    const headCols=model.map(g=>{ const cs=bunruiStyle(g.bunrui); return `<th class="r" style="color:${cs.fg}">${esc(g.komoku)}</th>`; }).join("");
+    const footRow=`<tr class="foot"><td class="mo">年間合計</td><td class="r tot">${yen(grand)}</td>${model.map(g=>`<td class="r">${cell(colTotals[g.komoku]||0)}</td>`).join("")}</tr>`;
+    const kind=isV?"車両":"拠点", period=`${months[0].label} 〜 ${months[11].label}`;
+    const title=`${label}_年間コスト_${months[0].ym}_${months[11].ym}`;
+    const html=`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>${esc(title)}</title>
+<style>
+  @page{ size:A4 landscape; margin:10mm; }
+  *{box-sizing:border-box}
+  body{font-family:'Noto Sans JP','Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif;color:#1B2330;margin:0}
+  .hd{display:flex;align-items:baseline;gap:14px;margin:0 0 10px;flex-wrap:wrap}
+  .hd .plate{font-size:17px;font-weight:800;border:1px solid #1B2330;border-radius:6px;padding:3px 12px}
+  .hd .sub{font-size:12px;color:#5A6472}
+  .hd .grand{font-weight:800;color:#1B2330}
+  table{width:100%;border-collapse:collapse;font-size:9.5px;table-layout:fixed}
+  th,td{border:1px solid #D9DED5;padding:4px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  thead th{background:#F3F5F2;font-weight:800;text-align:right;font-size:9px}
+  th.mo,td.mo{text-align:left;font-weight:700}
+  td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+  td.tot{font-weight:800}
+  tr.foot td{background:#F3F5F2;font-weight:800;border-top:2px solid #1B2330}
+  @media print{ body{margin:0} table,tr{page-break-inside:avoid} }
+</style></head>
+<body>
+  <div class="hd"><span class="plate">${esc(label)}</span><span class="sub">${kind}・年間コスト一覧（${esc(period)}）</span><span class="sub grand">年間合計 ${yen(grand)}</span></div>
+  <table><thead><tr><th class="mo">月</th><th class="r">月合計</th>${headCols}</tr></thead>
+  <tbody>${bodyRows}${footRow}</tbody></table>
+<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
+</body></html>`;
+    const w=window.open("","_blank");
+    if(!w){ toast("ポップアップがブロックされました。ブラウザの設定で許可してください"); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+    toast(`${label} の年間コストをPDF出力します（印刷ダイアログでPDFとして保存）`);
+  }catch(e){ toast("PDF出力を開始できませんでした"); }
 }
 function renderVehAnnual(){
   const allVehs=buildVehicles("all").filter(v=>!state.vehTrash.has(v.key)).sort((a,b)=>b.total-a.total);
