@@ -418,6 +418,9 @@
   .total-box .v{font-family:var(--mono);font-weight:800;font-size:var(--fs-key);color:var(--ink)}
 
   .line-card{border:1px solid var(--line);border-radius:10px;padding:12px 13px;margin-bottom:var(--space-det);background:var(--panel)}
+  /* 変更履歴「変更箇所を開く」で指定された明細をハイライト */
+  .line-card.lc-hl{border-color:var(--greenDark);box-shadow:0 0 0 2px var(--greenSoft);animation:lcHl 1.6s ease-out 1}
+  @keyframes lcHl{0%{box-shadow:0 0 0 4px var(--greenLine)}100%{box-shadow:0 0 0 2px var(--greenSoft)}}
   /* 内訳：別車両の明細（編集不可）。淡色＋点線で他車両であることを明示 */
   .line-card.lc-other{background:#F4F5F7;border-style:dashed;opacity:.78}
   .line-card.lc-other .in,.line-card.lc-other .komoku-ref{background:#EEF0F3}
@@ -2995,14 +2998,15 @@ function renderCoach(){
 }
 
 /* ───── 右サイドパネル（書類詳細） ───── */
-function openPanel(id){
+function openPanel(id,hlLid){
   const d=docs.find(x=>x.id===id); if(!d)return;
+  state.panelHighlightLid = hlLid!=null ? String(hlLid) : null; // 変更履歴などから開いた際に強調する明細
   state.panelId=id; state.draft=Object.assign(JSON.parse(JSON.stringify(d)),{lines:JSON.parse(JSON.stringify(linesOf(id)))}); state.draft._ocr=ocrAmountCandidates(state.draft.lines); state.pvOriginal=JSON.parse(JSON.stringify(state.draft)); state.pvZoom=100; state.panelJustOpened=true;
   // AI明細確認ステップは廃止。書類を開いたら直接、明細フォーム（編集画面）を表示する
   state.aiConfirm = null;
   renderOverlay();
 }
-function closePanel(){state.panelId=null;state.draft=null;state.pvOriginal=null;state.pnDeleteLid=null;state.aiConfirm=null;state.panelCtx=null;renderOverlay();}
+function closePanel(){state.panelId=null;state.draft=null;state.pvOriginal=null;state.pnDeleteLid=null;state.aiConfirm=null;state.panelCtx=null;state.panelHighlightLid=null;renderOverlay();}
 
 /* ───── 明細確認ステップ（書類を開いた直後／AI読み取り明細の選択・反映） ───── */
 function aiSparkle(){return `<svg width="16" height="16" viewBox="0 0 24 24" fill="#177D58" aria-hidden="true"><path d="M12 2l1.7 5.1a3 3 0 0 0 1.9 1.9L20.7 11l-5.1 1.7a3 3 0 0 0-1.9 1.9L12 19.7l-1.7-5.1a3 3 0 0 0-1.9-1.9L3.3 11l5.1-1.7a3 3 0 0 0 1.9-1.9z"/></svg>`;}
@@ -3086,6 +3090,7 @@ function panelNav(delta){
   if(idx<0) return;
   const ni=idx+delta; if(ni<0||ni>=list.length) return;
   const d=list[ni];
+  state.panelHighlightLid=null; // 別書類へ移動したら強調は解除
   state.panelId=d.id; state.draft=Object.assign(JSON.parse(JSON.stringify(d)),{lines:JSON.parse(JSON.stringify(linesOf(d.id)))}); state.draft._ocr=ocrAmountCandidates(state.draft.lines); state.pvOriginal=JSON.parse(JSON.stringify(state.draft)); state.pvZoom=100; state.panelJustOpened=false; state.pnDeleteLid=null;
   // AI明細確認ステップは廃止。遷移先の書類も直接、明細フォームを表示する
   state.aiConfirm = null;
@@ -3160,7 +3165,7 @@ function renderPanel(){
              <input id="pn-plate-${l.lid}" class="in mono b-r" ${ro} value="${esc(l.plate)}" placeholder="（対象なし）" autocomplete="off" oninput="pnPlateInput(${l.lid},this.value)">
              ${!lro?`<div class="sug-pop" id="pn-sug-${l.lid}">${plateSuggestHTML(l.lid,l.plate)}</div>`:''}
            </div></div>`;
-    return `<div class="line-card${otherVeh?" lc-other":""}">
+    return `<div class="line-card${otherVeh?" lc-other":""}${String(l.lid)===state.panelHighlightLid?" lc-hl":""}" id="lc-${l.lid}">
       <div class="lc-head"><span class="lc-no">明細 ${idx+1}</span>
         <span class="match-badge" id="pn-badge-${l.lid}">${matchBadge(l)}</span>
         ${otherVeh?`<span class="lc-other-tag" title="${fromSite?`この拠点（${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}）の拠点コスト以外の明細のため編集できません`:`この車両（${esc(state.vehDocsMeta?state.vehDocsMeta.target:"")}）以外の明細のため編集できません`}">${fromSite?"車両明細・編集不可":"他車両の明細・編集不可"}</span>`:""}
@@ -3769,15 +3774,27 @@ function openChangelog(){ state.changelogSeenCount=CHANGELOG.length; state.chang
 function closeChangelog(){ state.changelogOpen=false; renderOverlay(); }
 function gotoChange(idx){ const e=CHANGELOG[idx]; if(!e) return;
   state.changelogOpen=false;
-  if(e.siteTrash){ // 拠点のゴミ箱／復元・拠点コスト編集は拠点コストタブへ
+  if(e.siteTrash){ // 拠点のゴミ箱／復元はゴミ箱ビューへ
     state.view="vehicles"; state.vehTab="sites"; state.siteTrashView=state.siteTrash.has(e.siteOffice); render(); return;
   }
-  if(e.siteOffice){ // 拠点コスト編集は拠点コストタブへ移動（行内編集モーダルは持たない）
-    state.view="vehicles"; state.vehTab="sites"; render(); return;
-  }
-  if(e.vehTrash){ // ゴミ箱への移動／復元はコスト一覧（該当ビュー）へ移動
+  if(e.vehTrash){ // 車両のゴミ箱への移動／復元はコスト一覧（該当ビュー）へ移動
     state.view="vehicles"; state.vehTrashView=state.vehTrash.has(e.vehKey); state.vehPage=1; render(); return;
   }
+  // 明細の変更：内訳編集モーダルを開き、該当書類の詳細パネルで変更した明細を強調表示する
+  if(e.docId){
+    state.view="vehicles";
+    state.vehTab = e.siteOffice ? "sites" : "individual";
+    render();
+    if(e.siteOffice) openSiteDocs(e.siteOffice);
+    else openVehDocs(e.vehKey,e.kind,e.vehTarget);
+    // 対象書類が絞り込みで隠れないよう、内訳一覧を全期間・全原価項目にする
+    state.vehDocsStart=null; state.vehDocsEnd=null; state.vehDocsKomoku="all";
+    openVehDocPanel(e.docId, e.lid); // 書類詳細パネルを開き、該当明細をハイライト
+    setTimeout(()=>{ const el=document.getElementById("lc-"+e.lid); if(el) el.scrollIntoView({block:"center",behavior:"smooth"}); },90);
+    return;
+  }
+  // docId が無い（手動明細など・書類詳細を持たない）場合は従来のインライン内訳編集にフォールバック
+  if(e.siteOffice){ state.view="vehicles"; state.vehTab="sites"; render(); return; }
   openVehEdit(e.vehKey,e.kind,e.vehTarget,e.lid);
   setTimeout(()=>{ const el=document.getElementById("vdrow-"+e.lid); if(el) el.scrollIntoView({block:"center",behavior:"smooth"}); },70);
 }
@@ -4287,7 +4304,7 @@ function vehDocsPager(info){
    書類一覧と同一の右サイドパネル（renderPanel）を再利用する。内訳（コストモニター）から
    開いた場合は state.panelCtx="vehdocs" を立て、連携済み書類でも編集可能にし、前へ／次へは
    この車両の絞り込み済み書類一覧を辿る。「完了」で明細を保存して一覧へ戻る。 */
-function openVehDocPanel(docId){ state.panelCtx="vehdocs"; state.vehDocsCalOpen=false; openPanel(docId); }
+function openVehDocPanel(docId,hlLid){ state.panelCtx="vehdocs"; state.vehDocsCalOpen=false; openPanel(docId,hlLid); }
 /* 内訳パネルで開いている書類一覧（前へ／次へ・保存後の戻り先の母集合） */
 function panelDocList(){
   if(state.panelCtx==="vehdocs" && state.vehDocsKey) return vehDocsList().map(x=>x.d);
