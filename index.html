@@ -519,6 +519,34 @@
   .sug-opt:hover{background:var(--greenSoft)}
   .sug-opt.none{font-family:var(--sans);color:var(--inkSoft);font-weight:700;border-bottom:1px solid var(--lineSoft)}
   .sug-empty{padding:9px 12px;font-size:11.5px;color:var(--inkFaint)}
+  /* 取引先サジェスト・登録状態 */
+  .sug-head{padding:8px 12px 6px;font-size:10.5px;font-weight:700;color:var(--inkFaint);border-bottom:1px solid var(--lineSoft);position:sticky;top:0;background:#fff}
+  .vn-opt{display:flex;align-items:center;justify-content:space-between;gap:10px;font-family:var(--sans)}
+  .vn-nm{font-weight:600;color:var(--ink)}
+  .vn-rel{font-size:10.5px;color:var(--inkSoft);background:#EEF0F3;border-radius:999px;padding:2px 8px;white-space:nowrap}
+  .vn-new{display:flex;align-items:center;gap:6px;font-family:var(--sans);font-weight:700;color:var(--greenDark);border-top:1px solid var(--lineSoft);position:sticky;bottom:0;background:#fff}
+  .vn-new:hover{background:var(--greenSoft)}
+  .vn-status{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:6px;font-size:11.5px;font-weight:700}
+  .vn-status.vn-ok{color:var(--teal)}
+  .vn-status.vn-none{color:var(--inkSoft)}
+  .vn-status.vn-new{color:var(--amber)}
+  .vn-reg-btn{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;color:var(--greenDark);background:var(--greenSoft);border:1px solid var(--greenLine);border-radius:7px;padding:4px 9px;cursor:pointer}
+  .vn-reg-btn:hover{background:#D8ECDF}
+  .vn-cell-empty{color:var(--inkFaint)}
+  .vn-unreg-tag{display:inline-flex;align-items:center;gap:2px;margin-left:6px;font-size:10px;font-weight:700;color:var(--amber);background:var(--amberSoft);border-radius:999px;padding:1px 7px;vertical-align:middle}
+  /* 取引先 新規登録モーダル */
+  .vr-sec{font-size:13px;font-weight:800;color:var(--ink);margin:2px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .vr-req{font-size:10.5px;font-weight:700;color:var(--alert);border:1px solid #E0B8B2;border-radius:5px;padding:0 5px;margin-left:4px}
+  .vr-rel{display:flex;gap:10px;flex-wrap:wrap}
+  .vr-rel-box{display:flex;align-items:center;gap:8px;min-width:120px;padding:11px 14px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;user-select:none}
+  .vr-rel-box:hover{border-color:var(--green)}
+  .vr-rel-box.on{border-color:var(--green);background:var(--greenSoft);color:var(--greenDark)}
+  .vr-cb{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1.5px solid #C6CDD6;border-radius:4px;background:#fff}
+  .vr-rel-box.on .vr-cb{border-color:var(--green);background:#fff}
+  .vr-addr{display:grid;grid-template-columns:minmax(180px,1fr) 150px 1.4fr;gap:12px;align-items:end}
+  .vr-zip{display:flex;gap:8px}
+  .vr-zip-btn{white-space:nowrap;padding:0 12px}
+  @media(max-width:620px){ .vr-addr{grid-template-columns:1fr} }
   /* ?ヘルプ ツールチップ */
   .help{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:999px;background:#C6CDD6;color:#fff;font-size:10px;font-weight:800;margin-left:4px;cursor:help;position:relative;vertical-align:middle}
   .help:hover,.help:focus{background:var(--green);outline:none}
@@ -1811,6 +1839,29 @@ const GEN_VENDORS=[
  {n:"三菱HCキャピタル",cat:["調達コスト"]},
  {n:"愛知県自動車税事務所",cat:["税金"]},
 ];
+/* ───── 取引先マスタ（請求書の取引先を突合する真実源。マスタデータで事前登録しておく想定） ─────
+   請求書の取引先名がここに一致すれば「登録済み取引先」として自動紐付けし、
+   一致しなければ「未登録取引先」として検知して新規登録を促す。 */
+const VENDOR_RELATIONS=["荷主","運送会社","その他"];
+const PREFECTURES=["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
+let _vnSeq=0;
+function nextVendorId(){ return "VN-"+String(++_vnSeq).padStart(3,"0"); }
+/* 適格請求書発行事業者登録番号（T＋13桁）を決定論で生成（デモ用） */
+function _vnInvoiceNo(name){ const s=(String(_hash("inv:"+name))+String(_hash("num:"+name))+"0000000000000").slice(0,13); return "T"+s; }
+const VENDOR_MASTER=[];
+(function initVendorMaster(){
+  GEN_VENDORS.forEach(v=>{
+    VENDOR_MASTER.push({ id:nextVendorId(), name:v.n, kana:"", relations:["その他"],
+      billingName:"", corpNo:"", invoiceNo:_vnInvoiceNo(v.n), tel:"", fax:"", email:"",
+      zip:"", pref:"", addr:"" });
+  });
+})();
+/* 取引先名の正規化（前後空白・全半角空白を除去して突合精度を上げる） */
+function normVendorName(s){ return String(s||"").replace(/[\s　]+/g,"").trim(); }
+/* 取引先名からマスタを検索（完全一致・正規化後） */
+function findVendorByName(name){ const n=normVendorName(name); if(!n) return null; return VENDOR_MASTER.find(v=>normVendorName(v.name)===n)||null; }
+/* 取引先が登録済みか（true＝登録済み／false＝未登録・空欄含む） */
+function vendorIsRegistered(name){ return !!findVendorByName(name); }
 const GEN_ITEMS={
  "燃料費":["軽油 給油（月次）","ガソリン 給油（月次）","アドブルー補充"],
  "修繕・維持費":["継続車検 / 24ヶ月点検","12ヶ月点検","オイル・エレメント交換","ブレーキパッド交換","バッテリー交換","タイヤ4本交換","スタッドレス組替","フロントバンパー交換","左サイドパネル板金塗装"],
@@ -2080,6 +2131,16 @@ function anomalyDemoDocs(){
   return out;
 }
 
+/* 未登録取引先の検知デモ：取引先マスタに未登録の取引先からの請求書（編集可能な状態で用意）。
+   書類詳細の取引先欄で「未登録取引先」として検知され、その場で新規登録できることを示す。 */
+function unregisteredVendorDocs(){
+  return [
+    {name:"庸車費_丸和急配_202606.pdf", vendor:"丸和急配", cat:"請求書", status:"未入力", category:"名古屋営業所",
+      lines:[L("委託運賃（6月分・傭車）","名古屋200あ3344","調達コスト","2026-06-20",180000,.95)]},
+    {name:"整備費_ダイハツ東海サービス_202605.pdf", vendor:"ダイハツ東海サービス", cat:"請求書", status:"入力済み", category:"岡崎営業所",
+      lines:[L("定期点検・オイル交換","岡崎100か2233","修繕・維持費","2026-05-22",26400,.96)]},
+  ];
+}
 /* No 採番：生成分（古い）→ SEED（新しい）の順で積み、SEEDを上位表示 */
 let NEXT_NO=1101;
 const docs=[];
@@ -2098,7 +2159,9 @@ function pushDoc(s){ const reflectedAt=s.status==="連携済み"?(maxLineDate(s)
   const category=s.category||CATEGORIES[docs.length%CATEGORIES.length];
   const id="d"+(docs.length+1);
   const {lines, ...rest}=s;
-  docs.push(Object.assign({id, no:NEXT_NO++, deleted:false, reflectedAt, category}, rest));
+  // 登録済み取引先なら生成時に自動紐付け（未登録は vendorId=null のまま）
+  const vm=findVendorByName(rest.vendor); const vendorId=vm?vm.id:null;
+  docs.push(Object.assign({id, no:NEXT_NO++, deleted:false, reflectedAt, category, vendorId}, rest));
   (lines||[]).forEach(l=>{ l.docId=id; LINES.push(l); }); }
 baselineDocs().forEach(pushDoc);
 genDocs(34).forEach(pushDoc);
@@ -2106,6 +2169,7 @@ genMultiDocs(14).forEach(pushDoc);
 sampleCostDocs().forEach(pushDoc);
 anomalyDemoDocs().forEach(pushDoc);
 SEED.forEach(pushDoc);
+unregisteredVendorDocs().forEach(pushDoc);
 
 /* ───── ユーティリティ ───── */
 const yen=n=>"¥"+Math.round(n).toLocaleString("ja-JP");
@@ -2143,6 +2207,13 @@ function matchBadge(l){
   return `<span class="badge" style="color:${m.fg};background:${m.bg}">${m.ic}${m.t}</span>`;
 }
 function catPill(c){const s=CAT_STYLE[c]||CAT_STYLE["税金"];return `<span class="catpill" style="color:${s.fg};background:${s.bg}">${esc(c)}</span>`;}
+/* 一覧の取引先セル：未登録取引先はバッジで検知表示（登録済みは自動紐付け済み） */
+function vendorCellHTML(d){
+  const nm=(d.vendor||"").trim();
+  if(!nm) return `<span class="vn-cell-empty">（取引先 未読取）</span>`;
+  if(vendorIsRegistered(nm)) return esc(d.vendor);
+  return `${esc(d.vendor)}<span class="vn-unreg-tag" title="取引先マスタに未登録です。書類詳細から新規登録できます。">${I.alert("#B87514",10)}未登録</span>`;
+}
 const STATUS_META={
   "未入力":{cls:"st-todo"}, "入力済み":{cls:"st-done"}, "連携済み":{cls:"st-reflected"},
 };
@@ -2201,6 +2272,7 @@ let state={
   dataLinkTab:"logipoke",
   settingsDraft:null, settingsSaveConfirm:false, settingsLeave:null,
   masterEdit:null, masterPage:1, masterPerPage:20,
+  vendorReg:null,   // 取引先の新規登録モーダル（書類詳細から起動）
 };
 
 /* ───── ナビ・トップ ───── */
@@ -2438,7 +2510,7 @@ function renderDocBody(){
       <td>${state.trash?`<span class="st st-deleted"><span class="dot"></span>削除済み</span>`:statusChip(d.status)}</td>
       <td><div class="docname">${I.file("#177D58",16)}<span class="nm" title="${esc(d.name)}">${esc(d.name)}</span></div></td>
       <td>${officeChip(d.category)}</td>
-      <td class="vendor">${esc(d.vendor)}</td>
+      <td class="vendor">${vendorCellHTML(d)}</td>
       <td class="date">${docDate(d)}</td>
       <td class="lc">${docLines(d).length} 件</td>
       <td class="r">${total}</td>
@@ -3155,7 +3227,14 @@ function renderPanel(){
     <div class="grid2">
       <div class="fld"><label>営業所</label>
         <select class="in" ${isReflected?"disabled":""} onchange="pnDoc('category',this.value)">${[""].concat(CATEGORIES.includes(d.category)||!d.category?CATEGORIES:[d.category].concat(CATEGORIES)).filter((x,i,a)=>a.indexOf(x)===i).map(c=>`<option value="${esc(c)}" ${c===(d.category||"")?"selected":""}>${c===""?"（未選択）":esc(c)}</option>`).join("")}</select></div>
-      <div class="fld"><label>取引先</label><input class="in" ${isReflected?"readonly":""} value="${esc(d.vendor)}" oninput="pnVendor(this.value)"></div>
+      <div class="fld"><label>取引先</label>
+        ${isReflected
+          ? `<input class="in" readonly value="${esc(d.vendor)}">`
+          : `<div class="sug-combo">
+               <input id="pn-vendor" class="in" value="${esc(d.vendor)}" placeholder="取引先マスタから選択または入力" autocomplete="off" oninput="pnVendorInput(this.value)">
+               <div class="sug-pop" id="pn-vendor-sug">${vendorSuggestHTML(d.vendor)}</div>
+             </div>`}
+        <div id="pn-vendor-status">${vendorStatusHTML(d.vendor)}</div></div>
     </div>
     <div class="total-box"><span class="lab">書類合計（明細 ${d.lines.length}件）</span><span class="v" id="pn-total">${yen(total)}</span></div>`;
 
@@ -3293,7 +3372,132 @@ function downloadOriginal(docId){
   }catch(e){ toast("ダウンロードを開始できませんでした"); }
 }
 function pnDoc(field,val){state.draft[field]=val;}
-function pnVendor(val){state.draft.vendor=val;refreshPreview();}
+/* 取引先サジェスト：マスタの取引先を候補として表示（フォーカス時に一覧）。
+   末尾に「新規取引先として登録」の導線を常設し、未登録取引先をその場で登録できる。 */
+function vendorSuggestHTML(val){
+  const v=normVendorName(val);
+  const list=VENDOR_MASTER.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name),"ja"));
+  const matches=v?list.filter(x=>normVendorName(x.name).indexOf(v)>=0||(x.kana&&normVendorName(x.kana).indexOf(v)>=0)):list;
+  let html=`<div class="sug-head">登録済みの取引先マスタ（${VENDOR_MASTER.length}件）</div>`;
+  if(matches.length){
+    html+=matches.map(x=>`<div class="sug-opt vn-opt" onmousedown="pnPickVendor('${esc(x.id)}')"><span class="vn-nm">${esc(x.name)}</span>${x.relations&&x.relations.length?`<span class="vn-rel">${esc(x.relations.join("・"))}</span>`:""}</div>`).join("");
+  } else {
+    html+=`<div class="sug-empty">一致する登録取引先がありません。新規登録できます。</div>`;
+  }
+  html+=`<div class="sug-opt vn-new" onmousedown="openVendorRegFromPanel()">${I.plus("#0E5A40",13)} 新規取引先として登録する</div>`;
+  return html;
+}
+/* 取引先の登録状態バッジ（登録済み＝自動紐付け／未登録＝新規登録を促す） */
+function vendorStatusHTML(name){
+  const nm=(name||"").trim();
+  if(!nm) return `<div class="vn-status vn-none">${I.alert("#5A6472",13)} 取引先が未選択です</div>`;
+  const v=findVendorByName(nm);
+  if(v) return `<div class="vn-status vn-ok">${I.check("#157F73",13,2.6)} 登録済み取引先に自動紐付け${v.invoiceNo?`（登録番号 ${esc(v.invoiceNo)}）`:""}</div>`;
+  return `<div class="vn-status vn-new">${I.alert("#B87514",13)} 未登録取引先です
+    <button class="vn-reg-btn" onclick="openVendorRegFromPanel()">${I.plus("#0E5A40",12)} 新規取引先登録</button></div>`;
+}
+/* 取引先の入力：手入力後、名称がマスタと一致すれば自動紐付け（vendorId 設定）、なければ未登録 */
+function pnVendorInput(val){
+  state.draft.vendor=val;
+  const v=findVendorByName(val); state.draft.vendorId=v?v.id:null;
+  updateVendorUI(); refreshPreview();
+}
+/* サジェストからマスタ取引先を選択＝既存マスタを自動紐付け */
+function pnPickVendor(id){
+  const v=VENDOR_MASTER.find(x=>x.id===id); if(!v)return;
+  state.draft.vendor=v.name; state.draft.vendorId=v.id;
+  const inp=document.getElementById("pn-vendor"); if(inp){ inp.value=v.name; inp.blur(); }
+  updateVendorUI(); refreshPreview();
+}
+/* サジェスト一覧と登録状態バッジをその場で更新（再描画なしでフォーカスを保つ） */
+function updateVendorUI(){
+  const sug=document.getElementById("pn-vendor-sug"); if(sug) sug.innerHTML=vendorSuggestHTML(state.draft.vendor);
+  const st=document.getElementById("pn-vendor-status"); if(st) st.innerHTML=vendorStatusHTML(state.draft.vendor);
+}
+function pnVendor(val){ pnVendorInput(val); }
+/* ───── 取引先の新規登録（未登録取引先を書類詳細からその場で登録） ───── */
+function openVendorRegFromPanel(){
+  const inp=document.getElementById("pn-vendor");
+  const nm=inp?inp.value:((state.draft&&state.draft.vendor)||"");
+  openVendorReg(nm);
+}
+function openVendorReg(prefillName){
+  state.vendorReg={ name:(prefillName||"").trim(), kana:"", relations:[], billingName:"",
+    corpNo:"", invoiceNo:"T", tel:"", fax:"", email:"", zip:"", pref:"", addr:"", fromPanel:!!state.panelId };
+  renderOverlay();
+}
+function closeVendorReg(){ state.vendorReg=null; renderOverlay(); }
+function vendorRegField(k,val){ if(state.vendorReg) state.vendorReg[k]=val; }
+function toggleVendorRegRelation(r){
+  const e=state.vendorReg; if(!e)return;
+  const i=e.relations.indexOf(r); if(i>=0) e.relations.splice(i,1); else e.relations.push(r);
+  const box=document.getElementById("vr-rel"); if(box) box.innerHTML=vendorRegRelHTML(e);
+}
+function vendorRegZipLookup(){ toast("郵便番号から住所を自動入力します（デモ）"); }
+function vendorRegRelHTML(e){
+  return VENDOR_RELATIONS.map(r=>{ const on=e.relations.indexOf(r)>=0;
+    return `<label class="vr-rel-box ${on?"on":""}" onclick="event.preventDefault();toggleVendorRegRelation('${esc(r)}')">
+      <span class="vr-cb">${on?I.check("#0E5A40",12,3):""}</span>${esc(r)}</label>`; }).join("");
+}
+function saveVendorReg(){
+  const e=state.vendorReg; if(!e)return;
+  const name=(e.name||"").trim();
+  if(!name){ toast("取引先名を入力してください"); return; }
+  if(!e.relations.length){ toast("取引関係を選択してください"); return; }
+  if(findVendorByName(name)){ toast("同じ取引先名がすでに登録されています"); return; }
+  const inv=(e.invoiceNo||"").trim();
+  const v={ id:nextVendorId(), name, kana:(e.kana||"").trim(), relations:e.relations.slice(),
+    billingName:(e.billingName||"").trim(), corpNo:(e.corpNo||"").trim(),
+    invoiceNo:(inv==="T"?"":inv), tel:(e.tel||"").trim(), fax:(e.fax||"").trim(),
+    email:(e.email||"").trim(), zip:(e.zip||"").trim(), pref:e.pref||"", addr:(e.addr||"").trim() };
+  VENDOR_MASTER.push(v);
+  const fromPanel=e.fromPanel;
+  state.vendorReg=null;
+  // 登録した取引先を編集中の書類へ自動紐付け
+  if(fromPanel && state.draft){ state.draft.vendor=v.name; state.draft.vendorId=v.id; }
+  render();
+  toast(`取引先「${v.name}」を登録しました`);
+}
+function renderVendorRegModal(){
+  const e=state.vendorReg; if(!e) return "";
+  const prefOpts=`<option value="" ${!e.pref?"selected":""}>未選択</option>`+PREFECTURES.map(p=>`<option value="${esc(p)}" ${e.pref===p?"selected":""}>${esc(p)}</option>`).join("");
+  return `<div class="ovl anim" style="z-index:80" onclick="if(event.target===this)closeVendorReg()"><div class="modal" style="width:min(720px,100%)">
+    <div class="m-head"><span class="t">${I.plus("#0E5A40",18)} 取引先の新規登録</span><button class="x" onclick="closeVendorReg()">${I.x("#5A6472",18)}</button></div>
+    <div class="m-body">
+      <div class="vr-sec">基本情報</div>
+      <div class="grid2">
+        <div class="fld"><label>取引先名 <span class="vr-req">必須</span></label>
+          <input class="in" value="${esc(e.name)}" oninput="vendorRegField('name',this.value)" placeholder="例：株式会社〇〇運輸"></div>
+        <div class="fld"><label>取引先名(かな)</label>
+          <input class="in" value="${esc(e.kana)}" oninput="vendorRegField('kana',this.value)" placeholder="例：かぶしきがいしゃまるまるうんゆ"></div>
+      </div>
+      <div class="fld"><label>取引関係 <span class="vr-req">必須</span></label>
+        <div class="vr-rel" id="vr-rel">${vendorRegRelHTML(e)}</div></div>
+      <div class="fld"><label>取引先名(帳票用)</label>
+        <input class="in" value="${esc(e.billingName)}" oninput="vendorRegField('billingName',this.value)" placeholder="帳票に印字する名称（未入力なら取引先名を使用）"></div>
+      <div class="fld"><label>法人番号</label>
+        <input class="in mono" value="${esc(e.corpNo)}" oninput="vendorRegField('corpNo',this.value)" placeholder="13桁の法人番号"></div>
+      <div class="fld"><label>適格請求書発行事業者登録番号</label>
+        <input class="in mono" value="${esc(e.invoiceNo)}" oninput="vendorRegField('invoiceNo',this.value)" placeholder="T＋13桁"></div>
+      <div class="grid2">
+        <div class="fld"><label>電話番号</label><input class="in mono" value="${esc(e.tel)}" oninput="vendorRegField('tel',this.value)" placeholder="052-123-4567"></div>
+        <div class="fld"><label>FAX番号</label><input class="in mono" value="${esc(e.fax)}" oninput="vendorRegField('fax',this.value)" placeholder="052-123-4568"></div>
+      </div>
+      <div class="fld"><label>メールアドレス</label><input class="in" value="${esc(e.email)}" oninput="vendorRegField('email',this.value)" placeholder="example@example.co.jp"></div>
+      <div class="vr-addr">
+        <div class="fld"><label>郵便番号</label>
+          <div class="vr-zip"><input class="in mono" value="${esc(e.zip)}" oninput="vendorRegField('zip',this.value)" placeholder="1234567">
+          <button class="btn-cancel vr-zip-btn" onclick="vendorRegZipLookup()">住所入力</button></div></div>
+        <div class="fld"><label>都道府県</label><select class="in" onchange="vendorRegField('pref',this.value)">${prefOpts}</select></div>
+        <div class="fld"><label>市区町村番地</label><input class="in" value="${esc(e.addr)}" oninput="vendorRegField('addr',this.value)" placeholder="〇〇市〇〇町1-2-3"></div>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn-cancel" onclick="closeVendorReg()">キャンセル</button>
+      <button class="btn-green" onclick="saveVendorReg()">${I.check("#fff",14,3)} 登録する</button>
+    </div>
+  </div></div>`;
+}
 function pnLine(lid,field,val){
   const l=state.draft.lines.find(x=>x.lid===lid); if(!l)return;
   if(field==="amount"){l.amount=parseInt(String(val).replace(/[^0-9]/g,""))||0;
@@ -3473,7 +3677,7 @@ function renderPnDeleteConfirm(){
 }
 function savePanel(){
   const d=docs.find(x=>x.id===state.panelId); if(!d)return;
-  Object.assign(d,{cat:state.draft.cat,category:state.draft.category,vendor:state.draft.vendor});
+  Object.assign(d,{cat:state.draft.cat,category:state.draft.category,vendor:state.draft.vendor,vendorId:state.draft.vendorId});
   writeLines(d.id, state.draft.lines);
   if(d.status==="未入力") d.status="入力済み";
   state.draft.status=d.status;
@@ -3570,7 +3774,7 @@ function reflectPanel(){
 function doReflectPanel(){
   const d=docs.find(x=>x.id===state.panelId); if(!d||d.status!=="入力済み")return;
   runReflect([{name:state.draft.name,lines:state.draft.lines}], `${state.draft.name} をデータ連携しました`, ()=>{
-    Object.assign(d,{cat:state.draft.cat,category:state.draft.category,vendor:state.draft.vendor}); writeLines(d.id, state.draft.lines);
+    Object.assign(d,{cat:state.draft.cat,category:state.draft.category,vendor:state.draft.vendor,vendorId:state.draft.vendorId}); writeLines(d.id, state.draft.lines);
     d.status="連携済み"; d.reflectedAt=nowStamp(); freezeLinesOf(d.id); state.draft.status="連携済み"; state.draft.reflectedAt=d.reflectedAt;
     state.selected.delete(d.id);
     render(); renderNav(); toast("車両コストへデータ連携しました", {label:"コストモニターを見る", fn:()=>{ closePanel(); gotoVehicles(); }});
@@ -4260,7 +4464,7 @@ function renderVehDocsModal(){
         <td class="no">${d.no}</td>
         <td>${statusChip(d.status)}</td>
         <td><div class="docname">${I.file("#177D58",16)}<span class="nm" title="${esc(d.name)}">${esc(d.name)}</span></div></td>
-        <td class="vendor">${esc(d.vendor)}</td>
+        <td class="vendor">${vendorCellHTML(d)}</td>
         <td class="date">${last||docDate(d)}</td>
         <td>${komCell}</td>
         <td class="lc">${lines.length} 件</td>
@@ -4335,7 +4539,7 @@ function lineEditDisabled(l){
 function vehDocCompleteSave(){
   const d=docs.find(x=>x.id===state.panelId);
   if(d&&state.draft){
-    Object.assign(d,{cat:state.draft.cat,category:state.draft.category,vendor:state.draft.vendor});
+    Object.assign(d,{cat:state.draft.cat,category:state.draft.category,vendor:state.draft.vendor,vendorId:state.draft.vendorId});
     writeLines(d.id, state.draft.lines);
     // 連携済み明細を直接更新したため、当該書類の override 調整は破棄（二重適用の防止）
     for(let i=ADJUSTMENTS.length-1;i>=0;i--){ if(ADJUSTMENTS[i].docId===d.id) ADJUSTMENTS.splice(i,1); }
@@ -6228,6 +6432,7 @@ function renderOverlay(){
   if(state.docTrashAction) h+=renderDocTrashConfirm();
   if(state.settingsSaveConfirm) h+=renderSettingsSaveConfirm();
   if(state.settingsLeave) h+=renderSettingsLeaveConfirm();
+  if(state.vendorReg) h+=renderVendorRegModal(); // 取引先の新規登録（書類詳細パネルの上に重ねる）
   const os=_captureScroll(ov);
   ov.innerHTML=h;
   _restoreScroll(ov,os);
